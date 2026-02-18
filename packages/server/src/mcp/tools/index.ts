@@ -19,6 +19,6 @@ export function registerAllTools(
   registerListThreads(server, provider, pipeline);
   registerGetThread(server, provider, pipeline);
   registerCreateDraft(server, provider);
-  registerListDrafts(server, provider);
+  registerListDrafts(server, provider, pipeline);
   registerListLabels(server, provider);
 }

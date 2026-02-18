@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import type { IncomingMessage, ServerResponse } from "node:http";
-import { apiKeyAuth } from "./auth/middleware.js";
 import { loadConfig } from "./config.js";
 import { handleMcpRequest } from "./mcp/route.js";
 import { createOAuthRoutes } from "./routes/oauth.js";

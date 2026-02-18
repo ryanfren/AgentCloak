@@ -158,6 +158,10 @@ export class BlocklistFilter implements EmailFilter {
     this.subjectPatterns = subjectPatternStrs.map((p) => new RegExp(p, "i"));
   }
 
+  getBlockedDomains(): string[] {
+    return this.blockedDomains;
+  }
+
   filter(message: EmailMessage): FilterResult {
     const senderEmail = message.from.email.toLowerCase();
     const senderDomain = senderEmail.split("@")[1] ?? "";

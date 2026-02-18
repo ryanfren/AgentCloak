@@ -1,4 +1,4 @@
-import { google, type Auth } from "googleapis";
+import { google } from "googleapis";
 import { createHmac, randomBytes } from "node:crypto";
 import type { Config } from "../../config.js";
 import type { OAuthTokens } from "../../storage/types.js";

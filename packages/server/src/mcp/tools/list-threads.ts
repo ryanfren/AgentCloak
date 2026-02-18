@@ -2,7 +2,23 @@ import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { FilterPipeline } from "../../filters/pipeline.js";
 import type { EmailProvider } from "../../providers/types.js";
+import type { EmailThread } from "../../providers/types.js";
 import { formatAddresses } from "./format.js";
+
+function isThreadBlocked(thread: EmailThread, pipeline: FilterPipeline): boolean {
+  // Check if all participants are from blocked domains
+  // A thread is blocked only if every participant domain is blocked
+  // (mixed threads with non-blocked participants are kept)
+  const blockedDomains = pipeline.blockedDomains;
+  if (blockedDomains.length === 0) return false;
+
+  const allBlocked = thread.participants.length > 0 && thread.participants.every((p) => {
+    const domain = p.email.toLowerCase().split("@")[1] ?? "";
+    return blockedDomains.some((d) => domain === d || domain.endsWith(`.${d}`));
+  });
+
+  return allBlocked;
+}
 
 export function registerListThreads(
   server: McpServer,
@@ -24,30 +40,40 @@ export function registerListThreads(
         pageToken: page_token,
       });
 
-      const summaries = result.threads.map((t) => ({
-        id: t.id,
-        subject: t.subject,
-        participants: formatAddresses(t.participants, pipeline),
-        messageCount: t.messageCount,
-        snippet: t.snippet,
-        lastMessageDate: t.lastMessageDate,
-        isUnread: t.isUnread,
-        labels: t.labels,
-      }));
+      let blockedCount = 0;
+      const summaries = result.threads
+        .filter((t) => {
+          if (isThreadBlocked(t, pipeline)) {
+            blockedCount++;
+            return false;
+          }
+          return true;
+        })
+        .map((t) => ({
+          id: t.id,
+          subject: t.subject,
+          participants: formatAddresses(t.participants, pipeline),
+          messageCount: t.messageCount,
+          snippet: t.snippet,
+          lastMessageDate: t.lastMessageDate,
+          isUnread: t.isUnread,
+          labels: t.labels,
+        }));
+
+      const response: Record<string, unknown> = {
+        threads: summaries,
+        totalResults: result.resultSizeEstimate,
+        nextPageToken: result.nextPageToken,
+      };
+      if (pipeline.showFilteredCount && blockedCount > 0) {
+        response.filteredCount = blockedCount;
+      }
 
       return {
         content: [
           {
             type: "text" as const,
-            text: JSON.stringify(
-              {
-                threads: summaries,
-                totalResults: result.resultSizeEstimate,
-                nextPageToken: result.nextPageToken,
-              },
-              null,
-              2,
-            ),
+            text: JSON.stringify(response, null, 2),
           },
         ],
       };

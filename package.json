@@ -5,9 +5,7 @@
   "description": "Open-source proxy that sits between AI agents and email, filtering sensitive content",
   "scripts": {
     "dev": "pnpm --filter @agentcloak/server dev",
-    "build": "pnpm -r build",
-    "test": "pnpm -r test",
-    "lint": "pnpm -r lint"
+    "build": "pnpm -r build"
   },
   "pnpm": {
     "onlyBuiltDependencies": ["better-sqlite3", "esbuild"]

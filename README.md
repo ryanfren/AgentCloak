@@ -11,7 +11,7 @@ An open-source proxy service that sits between AI agents and your email. AgentCl
 - **Thread reply auto-population** — When an agent creates a draft reply to a thread, recipients are auto-populated server-side from the thread's participants. The agent never needs to see or handle email addresses.
 - **HTML & Unicode sanitization** — HTML is converted to plaintext. Dangerous Unicode characters (zero-width chars, bidi overrides, tag characters) that could be used for prompt injection are stripped.
 - **Prompt injection detection** — Known injection patterns in email content are detected and flagged with warnings.
-- **OAuth tokens stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens are stored in encrypted SQLite and never exposed through the MCP interface.
+- **OAuth tokens stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens are stored in SQLite and never exposed through the MCP interface.
 - **Configurable per user** — All filter settings (blocklists, PII redaction, email address redaction, injection detection) are stored server-side where agents cannot access or modify them.
 
 ## How It Works
@@ -26,7 +26,7 @@ AgentCloak Server
   ├── Content filter pipeline (blocklist → sanitizer → PII → injection)
   ├── Email address redaction (structured fields + body text)
   ├── Gmail provider (OAuth2, token refresh)
-  └── Encrypted SQLite storage (tokens, API keys, filter configs)
+  └── SQLite storage (tokens, API keys, filter configs)
 ```
 
 Agents connect via MCP over HTTP with an API key. Every email passes through a four-stage filter pipeline before reaching the agent:
@@ -92,7 +92,7 @@ pnpm dev
 open http://localhost:3000/auth/gmail?user_id=<your-id>
 
 # Generate an API key
-pnpm --filter @agentcloak/cli start -- keys create <your-id> "my-key"
+pnpm --filter @agentcloak/cli start -- keys create "my-key" --user-id <your-id>
 ```
 
 ### Connect to Claude Code
@@ -110,7 +110,7 @@ For stdio-only clients, use the `@agentcloak/mcp-stdio` package as a bridge.
 
 ## Filter Configuration
 
-Filters are configurable per user. All settings are stored server-side in encrypted SQLite — agents cannot access or modify them.
+Filters are configurable per user. All settings are stored server-side in SQLite — agents cannot access or modify them.
 
 **Default blocklists:**
 - **40 financial domains** (banks, brokerages, payment processors, mortgage servicers)
@@ -128,8 +128,8 @@ Filters are configurable per user. All settings are stored server-side in encryp
 Add custom filters via the CLI:
 
 ```bash
-agentcloak filters add-domain example.com
-agentcloak filters add-subject "confidential"
+agentcloak filters add-domain example.com --user-id <your-id>
+agentcloak filters add-subject "confidential" --user-id <your-id>
 ```
 
 ## Current Limitations
@@ -209,7 +209,7 @@ agentcloak filters add-subject "confidential"
 - **Hono** — HTTP framework (portable across Node, Workers, Deno, Bun)
 - **MCP SDK** — Model Context Protocol server (Streamable HTTP transport)
 - **googleapis** — Gmail API client
-- **better-sqlite3** — Encrypted SQLite storage
+- **better-sqlite3** — SQLite storage
 - **Zod** — Schema validation for MCP tool inputs
 - **html-to-text** — HTML to plaintext conversion
 

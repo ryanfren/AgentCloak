@@ -1,10 +1,13 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { FilterPipeline } from "../../filters/pipeline.js";
 import type { EmailProvider } from "../../providers/types.js";
+import { formatAddresses } from "./format.js";
 
 export function registerListDrafts(
   server: McpServer,
   provider: EmailProvider,
+  pipeline: FilterPipeline,
 ) {
   server.tool(
     "list_drafts",
@@ -18,7 +21,7 @@ export function registerListDrafts(
       const drafts = result.drafts.map((d) => ({
         id: d.id,
         messageId: d.messageId,
-        to: d.to.map((a) => `${a.name} <${a.email}>`),
+        to: formatAddresses(d.to, pipeline),
         subject: d.subject,
         snippet: d.snippet,
         updatedAt: d.updatedAt,

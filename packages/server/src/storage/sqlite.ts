@@ -18,7 +18,10 @@ export class SqliteStorage implements Storage {
     this.db = new Database(dbPath);
 
     if (encryptionKey) {
-      this.db.pragma(`key = '${encryptionKey}'`);
+      // Note: encryption requires better-sqlite3-multiple-ciphers instead of
+      // standard better-sqlite3. With the standard package, this pragma is a no-op.
+      const sanitized = encryptionKey.replace(/'/g, "''");
+      this.db.pragma(`key = '${sanitized}'`);
     }
 
     this.db.pragma("journal_mode = WAL");

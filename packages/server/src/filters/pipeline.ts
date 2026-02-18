@@ -10,12 +10,15 @@ export class FilterPipeline {
   private filters: EmailFilter[];
   public readonly showFilteredCount: boolean;
   public readonly emailRedactionEnabled: boolean;
+  public readonly blockedDomains: string[];
 
   constructor(userConfig?: StoredFilterConfig | null) {
     this.showFilteredCount = userConfig?.showFilteredCount ?? true;
     this.emailRedactionEnabled = userConfig?.emailRedactionEnabled ?? true;
+    const blocklist = new BlocklistFilter(userConfig);
+    this.blockedDomains = blocklist.getBlockedDomains();
     this.filters = [
-      new BlocklistFilter(userConfig),
+      blocklist,
       new SanitizerFilter(),
       new PiiFilter(
         userConfig?.piiRedactionEnabled ?? true,

@@ -6,6 +6,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 
 const CONFIG_FILE = join(homedir(), ".agentcloak", "config.json");
 
@@ -44,7 +45,7 @@ async function mcpRequest(
 ): Promise<unknown> {
   const body = {
     jsonrpc: "2.0",
-    id: Date.now(),
+    id: randomUUID(),
     method,
     params,
   };

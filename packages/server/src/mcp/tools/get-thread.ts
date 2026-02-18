@@ -36,7 +36,7 @@ export function registerGetThread(
         messageCount: thread.messageCount,
         messages: sanitizedMessages,
       };
-      if (pipeline.showFilteredCount) {
+      if (pipeline.showFilteredCount && blocked.length > 0) {
         response.filteredCount = blocked.length;
       }
 

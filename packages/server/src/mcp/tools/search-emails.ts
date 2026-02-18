@@ -43,7 +43,7 @@ export function registerSearchEmails(
         totalResults: result.resultSizeEstimate,
         nextPageToken: result.nextPageToken,
       };
-      if (pipeline.showFilteredCount) {
+      if (pipeline.showFilteredCount && blocked.length > 0) {
         response.filteredCount = blocked.length;
       }
 

@@ -71,6 +71,11 @@ async function main() {
       }
 
       const apiKey = authHeader.slice(7);
+      if (!apiKey.startsWith("ac_")) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Invalid API key format" }));
+        return;
+      }
       const keyHash = hashApiKey(apiKey);
       const storedKey = await storage.getApiKeyByHash(keyHash);
       if (!storedKey) {

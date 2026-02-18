@@ -68,12 +68,13 @@ const PII_PATTERNS: PiiPattern[] = [
     pattern: /(?:routing|aba|transit)\s*(?:number|no|#)?\s*:?\s*\d{9}\b/gi,
     replacement: "[ROUTING_NUMBER_REDACTED]",
   },
-  {
-    name: "Dollar Amount (large)",
-    pattern: /\$\d{1,3}(?:,\d{3})+\.\d{2}/g,
-    replacement: "[AMOUNT_REDACTED]",
-  },
 ];
+
+const DOLLAR_AMOUNT_PATTERN: PiiPattern = {
+  name: "Dollar Amount (large)",
+  pattern: /\$\d{1,3}(?:,\d{3})+\.\d{2}/g,
+  replacement: "[AMOUNT_REDACTED]",
+};
 
 const EMAIL_ADDRESS_PATTERN: PiiPattern = {
   name: "Email Address",
@@ -85,10 +86,12 @@ export class PiiFilter implements EmailFilter {
   name = "pii";
   private enabled: boolean;
   private emailRedactionEnabled: boolean;
+  private dollarAmountRedactionEnabled: boolean;
 
-  constructor(enabled = true, emailRedactionEnabled = true) {
+  constructor(enabled = true, emailRedactionEnabled = true, dollarAmountRedactionEnabled = true) {
     this.enabled = enabled;
     this.emailRedactionEnabled = emailRedactionEnabled;
+    this.dollarAmountRedactionEnabled = dollarAmountRedactionEnabled;
   }
 
   filter(message: EmailMessage): FilterResult {
@@ -99,7 +102,8 @@ export class PiiFilter implements EmailFilter {
     const sanitized = { ...message };
     let wasRedacted = false;
 
-    const redact = (text: string) => redactPii(text, this.emailRedactionEnabled);
+    const redact = (text: string) =>
+      redactPii(text, this.emailRedactionEnabled, this.dollarAmountRedactionEnabled);
     sanitized.body = redact(sanitized.body);
     sanitized.subject = redact(sanitized.subject);
     sanitized.snippet = redact(sanitized.snippet);
@@ -120,11 +124,15 @@ export class PiiFilter implements EmailFilter {
   }
 }
 
-function redactPii(text: string, emailRedaction: boolean): string {
+function redactPii(text: string, emailRedaction: boolean, dollarAmountRedaction: boolean): string {
   let result = text;
-  const patterns = emailRedaction
-    ? [...PII_PATTERNS, EMAIL_ADDRESS_PATTERN]
-    : PII_PATTERNS;
+  const patterns: PiiPattern[] = [...PII_PATTERNS];
+  if (dollarAmountRedaction) {
+    patterns.push(DOLLAR_AMOUNT_PATTERN);
+  }
+  if (emailRedaction) {
+    patterns.push(EMAIL_ADDRESS_PATTERN);
+  }
   for (const { pattern, replacement } of patterns) {
     // Reset regex lastIndex for global patterns
     pattern.lastIndex = 0;

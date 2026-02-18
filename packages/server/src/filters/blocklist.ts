@@ -2,7 +2,8 @@ import type { EmailMessage } from "../providers/types.js";
 import type { StoredFilterConfig } from "../storage/types.js";
 import type { EmailFilter, FilterResult } from "./types.js";
 
-const DEFAULT_BLOCKED_DOMAINS = [
+// Financial domains (banks, payments, investment, mortgage, gov financial)
+const FINANCIAL_BLOCKED_DOMAINS = [
   // Major banks
   "chase.com",
   "bankofamerica.com",
@@ -50,7 +51,8 @@ const DEFAULT_BLOCKED_DOMAINS = [
   "ssa.gov",
 ];
 
-const DEFAULT_BLOCKED_SENDER_PATTERNS = [
+// Sensitive sender patterns (security/verification senders)
+const SENSITIVE_SENDER_PATTERNS = [
   "noreply@.*\\.gov$",
   "security@",
   "security-noreply@",
@@ -66,7 +68,8 @@ const DEFAULT_BLOCKED_SENDER_PATTERNS = [
   "accountprotection\\.",
 ];
 
-const DEFAULT_BLOCKED_SUBJECT_PATTERNS = [
+// Security subject patterns (passwords, 2FA, verification, login alerts)
+const SECURITY_SUBJECT_PATTERNS = [
   // Password & credentials
   "password reset",
   "reset your password",
@@ -107,7 +110,10 @@ const DEFAULT_BLOCKED_SUBJECT_PATTERNS = [
   "suspicious (activity|sign.?in|login)",
   "unusual activity",
   "unauthorized (access|attempt)",
-  // Financial - statements & billing
+];
+
+// Financial subject patterns (statements, payments, tax docs)
+const FINANCIAL_SUBJECT_PATTERNS = [
   "wire transfer",
   "tax (document|return|form|statement|receipt)",
   "w-?2",
@@ -140,22 +146,36 @@ export class BlocklistFilter implements EmailFilter {
   private subjectPatterns: RegExp[];
 
   constructor(userConfig?: StoredFilterConfig | null) {
-    this.blockedDomains = [
-      ...DEFAULT_BLOCKED_DOMAINS,
-      ...(userConfig?.blockedDomains ?? []),
-    ];
+    // Domains: financial defaults (conditional) + user custom (always)
+    const domains: string[] = [];
+    if (userConfig?.financialBlockingEnabled !== false) {
+      domains.push(...FINANCIAL_BLOCKED_DOMAINS);
+    }
+    domains.push(...(userConfig?.blockedDomains ?? []));
+    this.blockedDomains = domains;
 
-    const senderPatternStrs = [
-      ...DEFAULT_BLOCKED_SENDER_PATTERNS,
-      ...(userConfig?.blockedSenderPatterns ?? []),
-    ];
-    this.senderPatterns = senderPatternStrs.map((p) => new RegExp(p, "i"));
+    // Sender patterns: sensitive sender defaults (conditional) + user custom (always)
+    const senderStrs: string[] = [];
+    if (userConfig?.sensitiveSenderBlockingEnabled !== false) {
+      senderStrs.push(...SENSITIVE_SENDER_PATTERNS);
+    }
+    senderStrs.push(...(userConfig?.blockedSenderPatterns ?? []));
+    this.senderPatterns = senderStrs
+      .map((p) => safeRegExp(p))
+      .filter((r): r is RegExp => r !== null);
 
-    const subjectPatternStrs = [
-      ...DEFAULT_BLOCKED_SUBJECT_PATTERNS,
-      ...(userConfig?.blockedSubjectPatterns ?? []),
-    ];
-    this.subjectPatterns = subjectPatternStrs.map((p) => new RegExp(p, "i"));
+    // Subject patterns: security defaults + financial defaults (conditional) + user custom (always)
+    const subjectStrs: string[] = [];
+    if (userConfig?.securityBlockingEnabled !== false) {
+      subjectStrs.push(...SECURITY_SUBJECT_PATTERNS);
+    }
+    if (userConfig?.financialBlockingEnabled !== false) {
+      subjectStrs.push(...FINANCIAL_SUBJECT_PATTERNS);
+    }
+    subjectStrs.push(...(userConfig?.blockedSubjectPatterns ?? []));
+    this.subjectPatterns = subjectStrs
+      .map((p) => safeRegExp(p))
+      .filter((r): r is RegExp => r !== null);
   }
 
   getBlockedDomains(): string[] {
@@ -199,5 +219,13 @@ export class BlocklistFilter implements EmailFilter {
     }
 
     return { action: "pass", message };
+  }
+}
+
+function safeRegExp(pattern: string): RegExp | null {
+  try {
+    return new RegExp(pattern, "i");
+  } catch {
+    return null;
   }
 }

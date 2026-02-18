@@ -8,6 +8,7 @@ COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY packages/server/package.json packages/server/
 COPY packages/cli/package.json packages/cli/
 COPY packages/mcp-stdio/package.json packages/mcp-stdio/
+COPY packages/web/package.json packages/web/
 RUN pnpm install --frozen-lockfile
 
 # Build
@@ -22,6 +23,7 @@ COPY --from=deps /app/node_modules node_modules
 COPY --from=deps /app/packages/server/node_modules packages/server/node_modules
 COPY --from=build /app/packages/server/dist packages/server/dist
 COPY --from=build /app/packages/server/package.json packages/server/
+COPY --from=build /app/packages/web/dist packages/web/dist
 
 VOLUME ["/app/data"]
 

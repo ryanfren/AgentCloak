@@ -87,6 +87,14 @@ export interface CreateDraftResult {
   messageId: string;
 }
 
+export interface ProviderInfo {
+  type: string;
+  searchCapabilities: string[];
+  supportsThreading: boolean;
+  supportedFolders: string[];
+  limitations: string[];
+}
+
 export interface EmailProvider {
   search(options: SearchOptions): Promise<SearchResult>;
   getMessage(messageId: string): Promise<EmailMessage>;
@@ -95,4 +103,5 @@ export interface EmailProvider {
   createDraft(input: CreateDraftInput): Promise<CreateDraftResult>;
   listDrafts(maxResults?: number): Promise<DraftListResult>;
   listLabels(): Promise<LabelInfo[]>;
+  getProviderInfo(): ProviderInfo;
 }

@@ -8,6 +8,8 @@ const configSchema = z.object({
   googleClientSecret: z.string().min(1),
   googleRedirectUri: z.string().url(),
   baseUrl: z.string().url(),
+  sessionSecret: z.string().min(32),
+  sessionMaxAge: z.coerce.number().default(7 * 24 * 60 * 60 * 1000), // 7 days
 });
 
 export type Config = z.infer<typeof configSchema>;
@@ -21,5 +23,7 @@ export function loadConfig(): Config {
     googleClientSecret: process.env.GOOGLE_CLIENT_SECRET,
     googleRedirectUri: process.env.GOOGLE_REDIRECT_URI,
     baseUrl: process.env.BASE_URL,
+    sessionSecret: process.env.SESSION_SECRET,
+    sessionMaxAge: process.env.SESSION_MAX_AGE,
   });
 }

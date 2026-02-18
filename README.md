@@ -1,18 +1,20 @@
 # AgentCloak
 
-An open-source proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
+An open-source proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens and IMAP credentials server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
 
 ## Key Safety Features
 
 - **Read-only by design** — Agents can search, read, and create drafts. They cannot send, delete, trash, or modify any emails.
-- **Sensitive email blocking** — Emails from financial institutions, security senders, and government agencies are blocked before the agent ever sees them. Subject-line patterns catch password resets, 2FA codes, bank statements, and more (40 domains, 13 sender patterns, 50+ subject patterns).
-- **PII redaction** — SSNs, credit card numbers, account numbers, routing numbers, API keys, and large dollar amounts are replaced with `[REDACTED]` placeholders.
+- **Sensitive email blocking** — Emails from financial institutions, security senders, and government agencies are blocked before the agent ever sees them. Blocking is split into independently toggleable categories: security emails (password resets, 2FA codes, login alerts), financial emails (bank statements, payments, tax docs), and sensitive senders (security@, fraud@, .gov addresses). 40+ domains, 13 sender patterns, and 50+ subject patterns are included by default.
+- **PII redaction** — SSNs, credit card numbers, account numbers, routing numbers, API keys, and large dollar amounts are replaced with `[REDACTED]` placeholders. Dollar amount redaction can be toggled independently.
 - **Email address redaction** — Email addresses are stripped from all structured fields (`from`, `to`, `cc`, `participants`) and replaced with display names only. Addresses in email body text are redacted as `[EMAIL_REDACTED]`. This prevents agents from exfiltrating contact information to external systems.
+- **Attachment filtering** — Attachment metadata (filenames, types, sizes) can be hidden from agents entirely, preventing them from referencing or requesting access to sensitive files.
+- **Folder restriction** — Restrict agent access to specific folders (e.g. INBOX only). Messages outside allowed folders are blocked, and restricted folder names are hidden from label listings.
 - **Thread reply auto-population** — When an agent creates a draft reply to a thread, recipients are auto-populated server-side from the thread's participants. The agent never needs to see or handle email addresses.
 - **HTML & Unicode sanitization** — HTML is converted to plaintext. Dangerous Unicode characters (zero-width chars, bidi overrides, tag characters) that could be used for prompt injection are stripped.
 - **Prompt injection detection** — Known injection patterns in email content are detected and flagged with warnings.
-- **OAuth tokens stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens are stored in SQLite and never exposed through the MCP interface.
-- **Configurable per user** — All filter settings (blocklists, PII redaction, email address redaction, injection detection) are stored server-side where agents cannot access or modify them.
+- **Credentials stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens and IMAP credentials are stored in encrypted SQLite and never exposed through the MCP interface.
+- **Web dashboard** — All filter settings, API keys, and connections are managed through a browser-based dashboard. Agents cannot access or modify these settings.
 
 ## How It Works
 
@@ -24,17 +26,22 @@ AI Agent (Claude Code, OpenClaw, any MCP client)
 AgentCloak Server
   ├── 7 MCP tools (search, read, threads, drafts, labels)
   ├── Content filter pipeline (blocklist → sanitizer → PII → injection)
+  ├── Attachment filtering & folder restriction
   ├── Email address redaction (structured fields + body text)
   ├── Gmail provider (OAuth2, token refresh)
+  ├── IMAP provider (encrypted credentials)
+  ├── Web dashboard (React + Tailwind)
   └── SQLite storage (tokens, API keys, filter configs)
 ```
 
 Agents connect via MCP over HTTP with an API key. Every email passes through a four-stage filter pipeline before reaching the agent:
 
-1. **Blocklist** — Blocks emails from financial institutions, government agencies, and security senders. Blocks subjects containing password resets, verification codes, bank statements, etc.
-2. **Sanitizer** — Converts HTML to plaintext, strips dangerous Unicode (zero-width chars, bidi overrides, tag characters).
-3. **PII Redaction** — Replaces SSNs, credit card numbers, account numbers, API keys, large dollar amounts, and email addresses with `[REDACTED]` placeholders.
-4. **Injection Detection** — Detects prompt injection patterns in email content and prepends warnings (does not block).
+1. **Folder restriction** — If allowed folders are configured, messages outside those folders are blocked before any other processing.
+2. **Blocklist** — Blocks emails from financial institutions, government agencies, and security senders. Each category (security, financial, sensitive sender) can be toggled independently. Custom blocked domains and subject patterns are always applied.
+3. **Sanitizer** — Converts HTML to plaintext, strips dangerous Unicode (zero-width chars, bidi overrides, tag characters).
+4. **PII Redaction** — Replaces SSNs, credit card numbers, account numbers, API keys, and email addresses with `[REDACTED]` placeholders. Dollar amount redaction is independently toggleable.
+5. **Injection Detection** — Detects prompt injection patterns in email content and prepends warnings (does not block).
+6. **Attachment filtering** — When enabled, strips attachment metadata from the output so agents cannot see filenames, types, or sizes.
 
 In addition to body-level filtering, all structured fields (`from`, `to`, `cc`, `participants`) are processed to show display names only — email addresses are never returned to the agent.
 
@@ -42,13 +49,13 @@ In addition to body-level filtering, all structured fields (`from`, `to`, `cc`, 
 
 | Tool | Description |
 |------|-------------|
-| `search_emails` | Search by Gmail query, returns filtered summaries |
+| `search_emails` | Search by query, returns filtered summaries |
 | `read_email` | Read full email content (sanitized) |
 | `list_threads` | List threads matching a query |
 | `get_thread` | Get all messages in a thread (each sanitized) |
 | `create_draft` | Create a draft (not sent — user must review). Thread replies auto-populate recipients server-side. |
 | `list_drafts` | List existing drafts |
-| `list_labels` | List Gmail labels with unread counts |
+| `list_labels` | List labels with unread counts (respects folder restrictions) |
 
 ## Project Structure
 
@@ -56,6 +63,7 @@ In addition to body-level filtering, all structured fields (`from`, `to`, `cc`, 
 agentcloak/
 ├── packages/
 │   ├── server/          # Core proxy server (Hono + MCP SDK)
+│   ├── web/             # Web dashboard (React + Tailwind + Vite)
 │   ├── cli/             # CLI for setup, key management, filters
 │   └── mcp-stdio/       # Stdio proxy for stdio-only environments
 └── deploy/
@@ -67,65 +75,132 @@ agentcloak/
 
 ### Prerequisites
 
-- Node.js 20+
-- pnpm 10+
-- A Google Cloud project with Gmail API enabled and OAuth 2.0 credentials
+- **Node.js 20+** and **pnpm 10+**
+- **IMAP credentials** (optional) — If connecting a non-Gmail account, you'll need the IMAP host, port, and an app-specific password from your email provider.
 
-### Setup
+### 1. Install
 
 ```bash
-# Install dependencies
+git clone https://github.com/yourusername/agentcloak.git
+cd agentcloak
 pnpm install
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your Google OAuth credentials:
-#   GOOGLE_CLIENT_ID=...
-#   GOOGLE_CLIENT_SECRET=...
-#   GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
-#   BASE_URL=http://localhost:3000
-
-# Start the server (SQLite database auto-creates on first run at data/agentcloak.db)
-pnpm dev
-
-# Connect your Gmail account
-open http://localhost:3000/auth/gmail?user_id=<your-id>
-
-# Generate an API key
-pnpm --filter @agentcloak/cli start -- keys create "my-key" --user-id <your-id>
 ```
 
-### Connect to Claude Code
+### 2. Set up Google OAuth
+
+Google OAuth is required for signing in to the dashboard (even if you only plan to use IMAP email accounts).
+
+1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
+2. Create a new project (or select an existing one)
+3. Enable the **Gmail API** under APIs & Services > Library
+4. Go to **APIs & Services > Credentials** and create an **OAuth 2.0 Client ID**
+   - Application type: **Web application**
+   - Authorized redirect URIs: `http://localhost:3000/auth/callback` (check port your server runs on)
+5. Copy the **Client ID** and **Client Secret** for the next step
+
+### 3. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Edit `.env` with your Google OAuth credentials and a session secret:
+
+```bash
+# Required — random string, 32+ characters (used for session cookies)
+SESSION_SECRET=change-me-to-a-random-string-at-least-32-chars
+
+# Required — Google OAuth credentials from step 2
+GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
+GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
+
+# Server
+BASE_URL=http://localhost:3000
+PORT=3000
+```
+
+### 4. Build and start the server
+
+```bash
+pnpm build   # builds all packages (server, web dashboard, CLI, stdio bridge)
+pnpm dev     # starts the server on http://localhost:3000
+```
+
+The SQLite database is created automatically at `data/agentcloak.db` on first run. The server serves both the API and the web dashboard from the same process.
+
+### 5. Sign in to the dashboard
+
+Open **http://localhost:3000** and click **"Sign in with Google"**. This creates your account and starts a session. The dashboard is where you manage everything — connections, API keys, and filters.
+
+### 6. Connect an email account
+
+From the **Connections** page:
+
+- **Gmail** — Click "Connect Gmail". You'll authorize read-only access through Google OAuth. AgentCloak stores the OAuth tokens server-side.
+- **IMAP** — Click "Add IMAP Account". Enter your server details (host, port, username, app password). You can test the connection before saving. Credentials are encrypted and stored in SQLite.
+
+### 7. Create an API key
+
+Click into your connection, then click **"Create Key"** in the API Keys section. Copy the key immediately — it's only shown once. Keys are prefixed with `ac_`.
+
+### 8. Configure content filters
+
+Scroll down on the connection detail page to **Content Filters**. All filters are enabled by default. You can:
+
+- Toggle blocking categories independently (security, financial, sensitive senders)
+- Toggle PII redaction, email address redaction, dollar amount redaction
+- Enable/disable attachment filtering and prompt injection detection
+- Add custom blocked domains and subject keywords
+- Restrict agent access to specific folders
+
+Click the info icon next to any filter for a detailed explanation of what it does.
+
+### 9. Connect your AI agent
+
+**Claude Code:**
 
 ```bash
 claude mcp add --transport http agentcloak http://localhost:3000/mcp \
   --header "Authorization: Bearer ac_your_key_here"
 ```
 
-### Connect to other MCP clients
+**Other MCP clients:**
 
-Any MCP client that supports Streamable HTTP transport can connect by pointing to `http://localhost:3000/mcp` with the `Authorization: Bearer ac_...` header.
+Any MCP client that supports Streamable HTTP transport can connect to `http://localhost:3000/mcp` with the header `Authorization: Bearer ac_...`.
 
-For stdio-only clients, use the `@agentcloak/mcp-stdio` package as a bridge.
+For stdio-only clients (that don't support HTTP transport), use the `@agentcloak/mcp-stdio` package as a bridge.
 
 ## Filter Configuration
 
-Filters are configurable per user. All settings are stored server-side in SQLite — agents cannot access or modify them.
+Filters are configurable per connection through the web dashboard. All settings are stored server-side in SQLite — agents cannot access or modify them. Each toggle includes an info icon with a detailed explanation of what it does.
 
-**Default blocklists:**
-- **40 financial domains** (banks, brokerages, payment processors, mortgage servicers)
-- **13 sender patterns** (security-noreply@, alerts@, fraud@, etc.)
-- **50+ subject patterns** (password reset, verification code, bank statement, payment confirmation, etc.)
+**Default blocklists (split into toggleable categories):**
+- **40+ financial domains** — Banks, brokerages, payment processors, mortgage servicers (toggle: Financial Email Blocking)
+- **13 sensitive sender patterns** — security-noreply@, alerts@, fraud@, .gov addresses, etc. (toggle: Sensitive Sender Blocking)
+- **34 security subject patterns** — Password resets, 2FA codes, verification emails, login alerts (toggle: Security Email Blocking)
+- **24 financial subject patterns** — Bank statements, payment confirmations, tax documents (toggle: Financial Email Blocking)
 
 **Configurable settings:**
+
 | Setting | Default | Description |
 |---------|---------|-------------|
-| Email address redaction | Enabled | Strip email addresses from all agent-visible responses |
-| PII redaction | Enabled | Redact SSNs, credit cards, account numbers, etc. |
-| Injection detection | Enabled | Flag prompt injection patterns in email content |
-| Show filtered count | Enabled | Tell agents how many emails were filtered out |
+| PII Redaction | Enabled | Redact SSNs, credit cards, account numbers, API keys, etc. |
+| Email Address Redaction | Enabled | Strip email addresses from all agent-visible responses |
+| Injection Detection | Enabled | Flag prompt injection patterns in email content |
+| Show Filtered Count | Enabled | Tell agents how many emails were filtered out |
+| Security Email Blocking | Enabled | Block password resets, 2FA codes, verification emails, login alerts |
+| Financial Email Blocking | Enabled | Block bank statements, payment confirmations, tax documents, financial domains |
+| Sensitive Sender Blocking | Enabled | Block emails from security/verification sender addresses |
+| Dollar Amount Redaction | Enabled | Redact large dollar amounts ($X,XXX.XX) separately from other PII |
+| Attachment Filtering | Enabled | Hide attachment metadata from agents |
 
-Add custom filters via the CLI:
+**Custom rules (managed via dashboard):**
+- **Custom Blocked Domains** — Add sender domains to block (e.g. marketing.example.com)
+- **Custom Blocked Subject Keywords** — Add subject line patterns to block (supports regex)
+- **Allowed Folders** — Restrict agent access to specific folders (leave empty to allow all)
+
+Custom rules can also be managed via the CLI:
 
 ```bash
 agentcloak filters add-domain example.com --user-id <your-id>
@@ -134,19 +209,16 @@ agentcloak filters add-subject "confidential" --user-id <your-id>
 
 ## Current Limitations
 
-- **No attachment content access.** Attachment metadata (filename, type, size) is returned, but the actual file content is not accessible. This is a security-conscious default — attachments like PDFs and images could contain sensitive information that bypasses text-based filters.
-- **Gmail only.** Outlook, IMAP, and other providers are not yet supported.
+- **No attachment content access.** Attachment metadata (filename, type, size) is available when attachment filtering is disabled, but actual file content is not accessible. This is a security-conscious default — attachments like PDFs and images could contain sensitive information that bypasses text-based filters.
 - **No send capability.** Agents can create drafts but cannot send emails. This is intentional.
-- **Single-user per API key.** Each API key maps to one Gmail account.
+- **Single-user per API key.** Each API key maps to one email connection.
 - **Regex-based PII detection.** PII redaction uses pattern matching, not ML. Some formats may be missed.
-- **No dashboard UI.** Filter and key management is CLI-only for now.
 
 ## Future Enhancements
 
 - **Attachment content reading** — Add a `read_attachment` tool that extracts text from PDFs and other documents, run through the filter pipeline before returning to the agent.
-- **Outlook / IMAP providers** — Extend beyond Gmail.
+- **Outlook provider** — Extend beyond Gmail and IMAP with native Outlook/Microsoft Graph support.
 - **ML-based injection detection** — Pluggable classifier for more sophisticated prompt injection detection.
-- **Web dashboard** — Browser-based UI for managing filters, API keys, and connected accounts.
 - **Cloudflare Workers deployment** — Edge deployment with D1 storage.
 - **Audit logging** — Log what agents access for compliance and debugging.
 
@@ -196,7 +268,7 @@ agentcloak filters add-subject "confidential" --user-id <your-id>
 
 **High value, higher effort:**
 
-8. **Multi-account aggregation** — Unified view across work + personal Gmail, or Gmail + Outlook, with per-account filter rules.
+8. **Multi-account aggregation** — Unified view across work + personal Gmail, or Gmail + IMAP, with per-account filter rules.
 
 9. **Real-time notifications** — Gmail Pub/Sub push notifications instead of polling. Enables alerts like "notify me immediately if I get an email from Meta."
 
@@ -208,10 +280,13 @@ agentcloak filters add-subject "confidential" --user-id <your-id>
 
 - **Hono** — HTTP framework (portable across Node, Workers, Deno, Bun)
 - **MCP SDK** — Model Context Protocol server (Streamable HTTP transport)
+- **React + Tailwind CSS + Vite** — Web dashboard
 - **googleapis** — Gmail API client
+- **ImapFlow** — IMAP client
 - **better-sqlite3** — SQLite storage
 - **Zod** — Schema validation for MCP tool inputs
 - **html-to-text** — HTML to plaintext conversion
+- **lucide-react** — Icon library
 
 ## License
 

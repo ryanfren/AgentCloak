@@ -4,21 +4,37 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Config } from "../config.js";
 import { FilterPipeline } from "../filters/pipeline.js";
 import { GmailProvider } from "../providers/gmail/client.js";
-import type { Storage } from "../storage/types.js";
+import { ImapProvider } from "../providers/imap/client.js";
+import type { EmailProvider } from "../providers/types.js";
+import type { ImapCredentials, OAuthTokens, Storage, StoredEmailConnection } from "../storage/types.js";
 import { registerAllTools } from "./tools/index.js";
 
 export async function handleMcpRequest(
   req: IncomingMessage,
   res: ServerResponse,
-  userId: string,
+  connectionId: string,
   storage: Storage,
   config: Config,
 ): Promise<void> {
-  // Load user
-  const user = await storage.getUser(userId);
-  if (!user) {
+  // Load connection
+  const connection = await storage.getConnection(connectionId);
+  if (!connection) {
     res.writeHead(404, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ error: "User not found. Connect Gmail first." }));
+    res.end(
+      JSON.stringify({
+        error: "Connection not found. Connect an email account first.",
+      }),
+    );
+    return;
+  }
+
+  if (connection.status !== "active") {
+    res.writeHead(403, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        error: `Connection is ${connection.status}. Reconnect your email account to continue.`,
+      }),
+    );
     return;
   }
 
@@ -28,9 +44,9 @@ export async function handleMcpRequest(
     version: "0.1.0",
   });
 
-  // Create provider and pipeline for this user
-  const provider = new GmailProvider(config, user.tokens, userId, storage);
-  const filterConfig = await storage.getFilterConfig(userId);
+  // Create provider and pipeline for this connection
+  const provider = createProvider(connection, config, storage);
+  const filterConfig = await storage.getFilterConfig(connectionId);
   const pipeline = new FilterPipeline(filterConfig);
 
   // Register tools
@@ -59,4 +75,28 @@ export async function handleMcpRequest(
 
   // Handle the MCP request — transport writes directly to res
   await transport.handleRequest(req, res, body);
+}
+
+function createProvider(
+  connection: StoredEmailConnection,
+  config: Config,
+  storage: Storage,
+): EmailProvider {
+  if (connection.provider === "gmail") {
+    return new GmailProvider(
+      config,
+      connection.tokens as OAuthTokens,
+      connection.id,
+      storage,
+    );
+  }
+
+  if (connection.provider === "imap" || connection.provider.startsWith("imap:")) {
+    return new ImapProvider(
+      connection.tokens as ImapCredentials,
+      config.sessionSecret,
+    );
+  }
+
+  throw new Error(`Unknown provider: ${connection.provider}`);
 }

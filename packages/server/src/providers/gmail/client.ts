@@ -10,6 +10,7 @@ import type {
   EmailProvider,
   EmailThread,
   LabelInfo,
+  ProviderInfo,
   SearchOptions,
   SearchResult,
   ThreadListResult,
@@ -19,15 +20,15 @@ import { parseEmailAddress, parseGmailMessage } from "./parser.js";
 
 export class GmailProvider implements EmailProvider {
   private gmail: gmail_v1.Gmail;
-  private userId: string;
+  private connectionId: string;
 
   constructor(
     config: Config,
     tokens: OAuthTokens,
-    userId: string,
+    connectionId: string,
     storage: Storage,
   ) {
-    this.userId = userId;
+    this.connectionId = connectionId;
     const auth = createOAuth2Client(config);
     auth.setCredentials({
       access_token: tokens.accessToken,
@@ -43,7 +44,7 @@ export class GmailProvider implements EmailProvider {
         expiresAt: newTokens.expiry_date ?? Date.now() + 3600 * 1000,
         scope: newTokens.scope ?? tokens.scope,
       };
-      storage.updateTokens(userId, updated).catch(console.error);
+      storage.updateConnectionTokens(connectionId, updated).catch(console.error);
     });
 
     this.gmail = google.gmail({ version: "v1", auth });
@@ -246,6 +247,26 @@ export class GmailProvider implements EmailProvider {
     }
 
     return labels;
+  }
+
+  getProviderInfo(): ProviderInfo {
+    return {
+      type: "gmail",
+      searchCapabilities: [
+        "from", "to", "subject", "body", "has:attachment",
+        "is:unread", "is:read", "is:starred",
+        "after:YYYY/MM/DD", "before:YYYY/MM/DD",
+        "label:name", "in:inbox", "in:sent", "in:trash",
+        "filename:ext", "larger:size", "smaller:size",
+      ],
+      supportsThreading: true,
+      supportedFolders: [
+        "INBOX", "SENT", "DRAFTS", "TRASH", "SPAM", "STARRED",
+        "IMPORTANT", "CATEGORY_SOCIAL", "CATEGORY_PROMOTIONS",
+        "CATEGORY_UPDATES", "CATEGORY_FORUMS",
+      ],
+      limitations: [],
+    };
   }
 
   private async batchGetMessages(ids: string[]): Promise<EmailMessage[]> {

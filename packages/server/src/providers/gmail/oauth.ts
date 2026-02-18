@@ -1,15 +1,30 @@
 import { google } from "googleapis";
-import { createHmac, randomBytes } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import type { Config } from "../../config.js";
 import type { OAuthTokens } from "../../storage/types.js";
 
-const SCOPES = [
+const LOGIN_SCOPES = [
+  "openid",
+  "https://www.googleapis.com/auth/userinfo.email",
+  "https://www.googleapis.com/auth/userinfo.profile",
+];
+
+const CONNECT_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.compose",
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
-export function createOAuth2Client(config: Config): InstanceType<typeof google.auth.OAuth2> {
+export type OAuthFlowType = "login" | "connect";
+
+export interface OAuthStateData {
+  flow: OAuthFlowType;
+  accountId: string; // empty string for login flow
+}
+
+export function createOAuth2Client(
+  config: Config,
+): InstanceType<typeof google.auth.OAuth2> {
   return new google.auth.OAuth2(
     config.googleClientId,
     config.googleClientSecret,
@@ -17,46 +32,82 @@ export function createOAuth2Client(config: Config): InstanceType<typeof google.a
   );
 }
 
-export function generateAuthUrl(
+export function generateLoginAuthUrl(config: Config): string {
+  const client = createOAuth2Client(config);
+  const state = signState("login", "", config.sessionSecret);
+
+  return client.generateAuthUrl({
+    access_type: "online",
+    prompt: "select_account",
+    scope: LOGIN_SCOPES,
+    state,
+  });
+}
+
+export function generateConnectAuthUrl(
   config: Config,
-  userId: string,
+  accountId: string,
 ): string {
   const client = createOAuth2Client(config);
-  const state = signState(userId, config.googleClientSecret);
+  const state = signState("connect", accountId, config.sessionSecret);
 
   return client.generateAuthUrl({
     access_type: "offline",
     prompt: "consent",
-    scope: SCOPES,
+    scope: CONNECT_SCOPES,
     state,
   });
+}
+
+export interface ExchangeResult {
+  tokens: OAuthTokens;
+  email: string;
+  name: string | null;
+  avatarUrl: string | null;
 }
 
 export async function exchangeCode(
   config: Config,
   code: string,
-): Promise<{ tokens: OAuthTokens; email: string }> {
+): Promise<ExchangeResult> {
   const client = createOAuth2Client(config);
   const { tokens } = await client.getToken(code);
+
+  if (!tokens.access_token) {
+    throw new Error("OAuth token exchange did not return an access token");
+  }
 
   client.setCredentials(tokens);
   const oauth2 = google.oauth2({ version: "v2", auth: client });
   const { data } = await oauth2.userinfo.get();
 
+  if (!data.email) {
+    throw new Error("Could not retrieve email from Google user info");
+  }
+
   return {
     tokens: {
-      accessToken: tokens.access_token!,
-      refreshToken: tokens.refresh_token!,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token ?? "",
       expiresAt: tokens.expiry_date ?? Date.now() + 3600 * 1000,
-      scope: tokens.scope ?? SCOPES.join(" "),
+      scope: tokens.scope ?? "",
     },
-    email: data.email!,
+    email: data.email,
+    name: data.name ?? null,
+    avatarUrl: data.picture ?? null,
   };
 }
 
-export function signState(userId: string, secret: string): string {
+const STATE_MAX_AGE_MS = 10 * 60 * 1000; // 10 minutes
+
+export function signState(
+  flow: OAuthFlowType,
+  accountId: string,
+  secret: string,
+): string {
   const nonce = randomBytes(16).toString("hex");
-  const payload = `${userId}:${nonce}`;
+  const timestamp = Date.now().toString(36);
+  const payload = `${flow}:${accountId}:${nonce}:${timestamp}`;
   const hmac = createHmac("sha256", secret).update(payload).digest("hex");
   return `${payload}:${hmac}`;
 }
@@ -64,15 +115,29 @@ export function signState(userId: string, secret: string): string {
 export function verifyState(
   state: string,
   secret: string,
-): { userId: string } | null {
+): OAuthStateData | null {
   const parts = state.split(":");
-  if (parts.length !== 3) return null;
+  if (parts.length !== 5) return null;
 
-  const [userId, nonce, hmac] = parts;
+  const [flow, accountId, nonce, timestamp, hmac] = parts;
+  if (flow !== "login" && flow !== "connect") return null;
+
+  // Check expiry
+  const stateTime = parseInt(timestamp!, 36);
+  if (Number.isNaN(stateTime) || Date.now() - stateTime > STATE_MAX_AGE_MS) {
+    return null;
+  }
+
+  const payload = `${flow}:${accountId}:${nonce}:${timestamp}`;
   const expectedHmac = createHmac("sha256", secret)
-    .update(`${userId}:${nonce}`)
+    .update(payload)
     .digest("hex");
 
-  if (hmac !== expectedHmac) return null;
-  return { userId };
+  // Timing-safe comparison
+  const hmacBuf = Buffer.from(hmac!, "hex");
+  const expectedBuf = Buffer.from(expectedHmac, "hex");
+  if (hmacBuf.length !== expectedBuf.length) return null;
+  if (!timingSafeEqual(hmacBuf, expectedBuf)) return null;
+
+  return { flow: flow as OAuthFlowType, accountId: accountId! };
 }

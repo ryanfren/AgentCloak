@@ -11,10 +11,14 @@ export class FilterPipeline {
   public readonly showFilteredCount: boolean;
   public readonly emailRedactionEnabled: boolean;
   public readonly blockedDomains: string[];
+  public readonly attachmentFilteringEnabled: boolean;
+  public readonly allowedFolders: string[];
 
   constructor(userConfig?: StoredFilterConfig | null) {
     this.showFilteredCount = userConfig?.showFilteredCount ?? true;
     this.emailRedactionEnabled = userConfig?.emailRedactionEnabled ?? true;
+    this.attachmentFilteringEnabled = userConfig?.attachmentFilteringEnabled ?? true;
+    this.allowedFolders = userConfig?.allowedFolders ?? [];
     const blocklist = new BlocklistFilter(userConfig);
     this.blockedDomains = blocklist.getBlockedDomains();
     this.filters = [
@@ -23,6 +27,7 @@ export class FilterPipeline {
       new PiiFilter(
         userConfig?.piiRedactionEnabled ?? true,
         userConfig?.emailRedactionEnabled ?? true,
+        userConfig?.dollarAmountRedactionEnabled ?? true,
       ),
       new InjectionFilter(userConfig?.injectionDetectionEnabled ?? true),
     ];
@@ -33,6 +38,22 @@ export class FilterPipeline {
   }
 
   process(message: EmailMessage): FilterResult {
+    // Folder restriction: block messages not in allowed folders
+    if (this.allowedFolders.length > 0) {
+      const allowed = this.allowedFolders.map((f) => f.toLowerCase());
+      const messageLabels = message.labels ?? [];
+      const hasAllowedFolder = messageLabels.some((label) =>
+        allowed.includes(label.toLowerCase()),
+      );
+      if (!hasAllowedFolder) {
+        return {
+          action: "block",
+          reason: "Folder not in allowed list",
+          message,
+        };
+      }
+    }
+
     let current = message;
 
     for (const filter of this.filters) {
@@ -43,6 +64,11 @@ export class FilterPipeline {
       }
 
       current = result.message;
+    }
+
+    // Attachment filtering: strip attachment metadata
+    if (this.attachmentFilteringEnabled) {
+      current = { ...current, attachments: [] };
     }
 
     return { action: "pass", message: current };

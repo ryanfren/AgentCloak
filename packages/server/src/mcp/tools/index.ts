@@ -7,6 +7,7 @@ import { registerListDrafts } from "./list-drafts.js";
 import { registerListLabels } from "./list-labels.js";
 import { registerListThreads } from "./list-threads.js";
 import { registerReadEmail } from "./read-email.js";
+import { registerProviderInfo } from "./provider-info.js";
 import { registerSearchEmails } from "./search-emails.js";
 
 export function registerAllTools(
@@ -20,5 +21,6 @@ export function registerAllTools(
   registerGetThread(server, provider, pipeline);
   registerCreateDraft(server, provider);
   registerListDrafts(server, provider, pipeline);
-  registerListLabels(server, provider);
+  registerListLabels(server, provider, pipeline);
+  registerProviderInfo(server, provider);
 }

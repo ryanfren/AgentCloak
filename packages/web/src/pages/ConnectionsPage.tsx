@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Check, Copy, Mail, Plus, Server, Trash2, Zap } from "lucide-react";
+import { Check, ChevronDown, Copy, Mail, Plus, Server, Trash2, Zap } from "lucide-react";
 import { api } from "../api/client";
 import type { Connection } from "../api/types";
 import { Card } from "../components/Card";
@@ -12,6 +12,8 @@ export function ConnectionsPage() {
   const [loading, setLoading] = useState(true);
   const [imapModalOpen, setImapModalOpen] = useState(false);
   const [gasModalOpen, setGasModalOpen] = useState(false);
+  const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const addMenuRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
     api
@@ -22,6 +24,18 @@ export function ConnectionsPage() {
   };
 
   useEffect(load, []);
+
+  // Close add menu on outside click
+  useEffect(() => {
+    if (!addMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (addMenuRef.current && !addMenuRef.current.contains(e.target as Node)) {
+        setAddMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [addMenuOpen]);
 
   const handleDelete = async (id: string) => {
     if (
@@ -42,28 +56,47 @@ export function ConnectionsPage() {
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Connections</h1>
-        <div className="flex items-center gap-2">
+        <div className="relative" ref={addMenuRef}>
           <button
-            onClick={() => setGasModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-amber-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-amber-600"
-          >
-            <Zap className="h-4 w-4" />
-            Connect via Apps Script
-          </button>
-          <button
-            onClick={() => setImapModalOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md bg-zinc-700 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-zinc-600"
-          >
-            <Server className="h-4 w-4" />
-            Add IMAP Account
-          </button>
-          <a
-            href="/api/connections/gmail/connect"
+            onClick={() => setAddMenuOpen((v) => !v)}
             className="inline-flex items-center gap-1.5 rounded-md bg-emerald-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
           >
             <Plus className="h-4 w-4" />
-            Connect Gmail
-          </a>
+            Add
+            <ChevronDown className="h-3.5 w-3.5" />
+          </button>
+          {addMenuOpen && (
+            <div className="absolute right-0 z-10 mt-1 w-52 rounded-md border border-zinc-700 bg-zinc-800 py-1 shadow-lg">
+              <button
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setGasModalOpen(true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+              >
+                <Zap className="h-4 w-4 text-amber-500" />
+                Gmail (Apps Script)
+              </button>
+              <a
+                href="/api/connections/gmail/connect"
+                onClick={() => setAddMenuOpen(false)}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+              >
+                <Mail className="h-4 w-4 text-zinc-400" />
+                Gmail (OAuth)
+              </a>
+              <button
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setImapModalOpen(true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+              >
+                <Server className="h-4 w-4 text-zinc-400" />
+                IMAP
+              </button>
+            </div>
+          )}
         </div>
       </div>
 

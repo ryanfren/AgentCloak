@@ -70,14 +70,14 @@ export function OverviewPage() {
               No connections yet
             </h2>
             <p className="mb-4 text-sm text-zinc-500">
-              Connect a Gmail account to get started.
+              Connect an email account to get started.
             </p>
-            <a
-              href="/api/connections/gmail/connect"
+            <Link
+              to="/connections"
               className="inline-flex rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
             >
-              Connect Gmail
-            </a>
+              Go to Connections
+            </Link>
           </div>
         </Card>
       ) : (

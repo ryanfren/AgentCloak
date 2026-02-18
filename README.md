@@ -86,17 +86,54 @@ cd agentcloak
 pnpm install
 ```
 
-### 2. Set up Google OAuth
+### 2. Set up Google Cloud project
 
-Google OAuth is required for signing in to the dashboard (even if you only plan to use IMAP email accounts).
+Google OAuth is required for signing in to the dashboard (even if you only plan to use IMAP email accounts). If you also want to connect a Gmail account, the same project handles that too.
+
+**Create a project and enable the Gmail API:**
 
 1. Go to the [Google Cloud Console](https://console.cloud.google.com/)
-2. Create a new project (or select an existing one)
-3. Enable the **Gmail API** under APIs & Services > Library
-4. Go to **APIs & Services > Credentials** and create an **OAuth 2.0 Client ID**
-   - Application type: **Web application**
-   - Authorized redirect URIs: `http://localhost:3000/auth/callback` (check port your server runs on)
-5. Copy the **Client ID** and **Client Secret** for the next step
+2. Click the project dropdown at the top and select **New Project**. Give it a name (e.g. "AgentCloak") and click **Create**.
+3. Make sure your new project is selected in the project dropdown.
+4. Go to **APIs & Services > Library** (or search "Gmail API" in the top search bar).
+5. Find **Gmail API** and click **Enable**.
+
+**Configure the OAuth consent screen:**
+
+6. Go to **APIs & Services > OAuth consent screen**.
+7. Select **External** as the user type and click **Create**.
+   > "Internal" is only available for Google Workspace orgs. External works for all Google accounts.
+8. Fill in the required fields on the app info page:
+   - **App name**: anything (e.g. "AgentCloak")
+   - **User support email**: your email address
+   - **Developer contact email**: your email address
+   - Leave everything else blank/default and click **Save and Continue**.
+9. On the **Scopes** page, click **Add or Remove Scopes** and add the following:
+   - `openid`
+   - `https://www.googleapis.com/auth/userinfo.email`
+   - `https://www.googleapis.com/auth/userinfo.profile`
+   - `https://www.googleapis.com/auth/gmail.readonly`
+   - `https://www.googleapis.com/auth/gmail.compose`
+
+   Click **Update**, then **Save and Continue**.
+   > The first three scopes are used for dashboard login. The last two are used when connecting a Gmail account (read emails + create drafts).
+10. On the **Test users** page, click **Add Users** and add the **Gmail address(es)** you want to access through AgentCloak. This is required — only listed test users can sign in while the app is in testing mode.
+
+    Click **Save and Continue**, then **Back to Dashboard**.
+
+> **Important:** Your app will be in **Testing** mode by default. This is fine — you do **not** need to publish or verify the app. Testing mode just limits sign-in to the test users you added above. If you skip adding test users, you'll get a "403: access_denied" error when trying to sign in.
+
+**Create OAuth credentials:**
+
+11. Go to **APIs & Services > Credentials**.
+12. Click **Create Credentials > OAuth client ID**.
+13. Set **Application type** to **Web application**.
+14. Under **Authorized redirect URIs**, click **Add URI** and enter:
+    ```
+    http://localhost:3000/auth/callback
+    ```
+    > If you changed the port in your `.env`, use that port instead.
+15. Click **Create**. Copy the **Client ID** and **Client Secret** — you'll need them in the next step.
 
 ### 3. Configure environment
 

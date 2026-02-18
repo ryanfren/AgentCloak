@@ -85,7 +85,7 @@ cp .env.example .env
 #   GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
 #   BASE_URL=http://localhost:3000
 
-# Start the server
+# Start the server (SQLite database auto-creates on first run at data/agentcloak.db)
 pnpm dev
 
 # Connect your Gmail account

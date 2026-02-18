@@ -54,6 +54,7 @@ async function mcpRequest(
     method: "POST",
     headers: {
       "Content-Type": "application/json",
+      Accept: "application/json, text/event-stream",
       Authorization: `Bearer ${config.apiKey}`,
     },
     body: JSON.stringify(body),
@@ -63,7 +64,23 @@ async function mcpRequest(
     throw new Error(`MCP request failed: ${res.status} ${res.statusText}`);
   }
 
-  const data = (await res.json()) as { result?: unknown; error?: { message: string } };
+  const contentType = res.headers.get("content-type") ?? "";
+  let data: { result?: unknown; error?: { message: string } };
+
+  if (contentType.includes("text/event-stream")) {
+    // Parse SSE response: extract JSON from "data: {...}" lines
+    const text = await res.text();
+    const dataLine = text
+      .split("\n")
+      .find((line) => line.startsWith("data: "));
+    if (!dataLine) {
+      throw new Error("No data in SSE response");
+    }
+    data = JSON.parse(dataLine.slice(6));
+  } else {
+    data = (await res.json()) as typeof data;
+  }
+
   if (data.error) {
     throw new Error(`MCP error: ${data.error.message}`);
   }

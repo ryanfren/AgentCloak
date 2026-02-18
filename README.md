@@ -211,18 +211,171 @@ Click the info icon next to any filter for a detailed explanation of what it doe
 
 ### 9. Connect your AI agent
 
-**Claude Code:**
+**Claude Code (recommended — zero install):**
 
+Claude Code connects directly to AgentCloak's MCP endpoint over HTTP. No local packages or proxies needed.
+
+Add to a single project (local scope):
 ```bash
 claude mcp add --transport http agentcloak http://localhost:3000/mcp \
   --header "Authorization: Bearer ac_your_key_here"
 ```
+
+Add globally (available in all projects):
+```bash
+claude mcp add --transport http agentcloak --scope user http://localhost:3000/mcp \
+  --header "Authorization: Bearer ac_your_key_here"
+```
+
+Or edit `~/.claude.json` directly. Claude Code reads MCP servers from three scopes. **The highest-priority scope wins, so only configure each server in one scope** to avoid confusion when updating API keys.
+
+| Priority | Scope | Location | When to use |
+|----------|-------|----------|-------------|
+| 1 (highest) | Project-local | `~/.claude.json` under `projects["/path"].mcpServers` | Different projects need different API keys (e.g., different email accounts) |
+| 2 | Project-shared | `.mcp.json` in project root (committed to git) | Shared team config. Don't put secrets here. |
+| 3 (lowest) | User/global | `~/.claude.json` top-level `mcpServers` | Same server available in all projects |
+
+**Global** — add to the top-level `mcpServers` in `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "agentcloak": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp",
+      "headers": {
+        "Authorization": "Bearer ac_your_key_here"
+      }
+    }
+  }
+}
+```
+
+**Project-local** — add under a specific project path in `~/.claude.json`. This overrides global config when Claude Code is launched from that directory:
+
+```json
+{
+  "projects": {
+    "/Users/you/your-project": {
+      "mcpServers": {
+        "agentcloak": {
+          "type": "http",
+          "url": "http://localhost:3000/mcp",
+          "headers": {
+            "Authorization": "Bearer ac_your_key_here"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+**Project-shared** — create `.mcp.json` in the project root (committed to git). Use env vars for secrets:
+
+```json
+{
+  "mcpServers": {
+    "agentcloak": {
+      "type": "http",
+      "url": "${AGENTCLOAK_URL:-http://localhost:3000}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${AGENTCLOAK_API_KEY}"
+      }
+    }
+  }
+}
+```
+
+> **Common pitfalls:**
+> - **`~/.claude/mcp.json` is NOT a recognized config file.** Don't put MCP configs there.
+> - **Don't define the same server in multiple scopes.** If agentcloak exists at both project-local and global scope, the project-local config wins silently. Updating the global key will have no effect.
+> - **When updating an API key**, search `~/.claude.json` for the server name first to confirm which scope it's configured in.
+> - **Restart Claude Code** after any config change. MCP connections are established at startup.
+
+After adding, restart Claude Code. The AgentCloak tools (`search_emails`, `read_email`, etc.) will appear automatically.
 
 **Other MCP clients:**
 
 Any MCP client that supports Streamable HTTP transport can connect to `http://localhost:3000/mcp` with the header `Authorization: Bearer ac_...`.
 
 For stdio-only clients (that don't support HTTP transport), use the `@agentcloak/mcp-stdio` package as a bridge.
+
+## Cloud Deployment (Railway)
+
+AgentCloak can be deployed to [Railway](https://railway.com) for multi-tenant cloud hosting. This lets multiple users sign up, connect their own email accounts, and generate API keys — without running anything locally.
+
+### Deploy to Railway
+
+1. **Install the Railway CLI** and log in:
+   ```bash
+   brew install railway
+   railway login
+   ```
+
+2. **Create a project and service:**
+   ```bash
+   railway init
+   ```
+
+3. **Add a persistent volume** at `/app/data` (for the SQLite database):
+   ```bash
+   railway volume add --mount /app/data
+   ```
+
+4. **Set environment variables:**
+   ```bash
+   railway variables set SESSION_SECRET="$(openssl rand -hex 32)"
+   railway variables set BASE_URL="https://your-app.up.railway.app"
+   railway variables set PORT=3000
+   railway variables set DATABASE_PATH=/app/data/agentcloak.db
+   ```
+
+   If using Google OAuth, also set:
+   ```bash
+   railway variables set GOOGLE_CLIENT_ID="your-client-id"
+   railway variables set GOOGLE_CLIENT_SECRET="your-secret"
+   railway variables set GOOGLE_REDIRECT_URI="https://your-app.up.railway.app/auth/callback"
+   ```
+
+5. **Deploy:**
+   ```bash
+   railway up
+   ```
+
+6. **Generate a public domain** from the Railway dashboard or CLI.
+
+### Connecting Claude Code to a cloud deployment
+
+Replace `localhost:3000` with your Railway URL:
+
+```bash
+claude mcp add --transport http agentcloak --scope user \
+  https://your-app.up.railway.app/mcp \
+  --header "Authorization: Bearer ac_your_key_here"
+```
+
+Or in `~/.claude.json`:
+
+```json
+{
+  "mcpServers": {
+    "agentcloak": {
+      "type": "http",
+      "url": "https://your-app.up.railway.app/mcp",
+      "headers": {
+        "Authorization": "Bearer ac_your_key_here"
+      }
+    }
+  }
+}
+```
+
+### Multi-tenant notes
+
+- Each user signs up with email/password on the dashboard, connects their own Gmail (via OAuth), and generates their own API key.
+- If using Google OAuth for Gmail connections, the server operator sets up the GCP project once. Users just need to be added as test users in the Google Cloud Console (or the OAuth app can be published to remove this restriction).
+- The Apps Script connection method is designed for self-hosters and may not work for multi-tenant deployments due to Google's authorization flow.
 
 ## Filter Configuration
 

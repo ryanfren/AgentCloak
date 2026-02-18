@@ -139,6 +139,26 @@ async function main() {
       }
 
       await storage.updateApiKeyLastUsed(storedKey.id);
+
+      // Ensure Accept header includes text/event-stream for MCP transport compatibility.
+      // Some clients (e.g., Claude Code) only send Accept: application/json.
+      // Hono's node-server reads from rawHeaders, so we must patch both.
+      const accept = req.headers.accept ?? "";
+      if (!accept.includes("text/event-stream")) {
+        const patched = accept
+          ? `${accept}, text/event-stream`
+          : "application/json, text/event-stream";
+        req.headers.accept = patched;
+        const idx = req.rawHeaders.findIndex(
+          (h) => h.toLowerCase() === "accept",
+        );
+        if (idx !== -1) {
+          req.rawHeaders[idx + 1] = patched;
+        } else {
+          req.rawHeaders.push("Accept", patched);
+        }
+      }
+
       try {
         await handleMcpRequest(
           req,

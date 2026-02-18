@@ -17,11 +17,19 @@ export interface ImapCredentials {
   tls: boolean;
 }
 
+export interface GasCredentials {
+  type: "gas";
+  endpointUrl: string;
+  encryptedSecret: string;
+  iv: string;
+  authTag: string;
+}
+
 /**
  * Union of credential types. Discriminate via `StoredEmailConnection.provider`
  * (not `type`), since existing OAuth records lack a `type` field.
  */
-export type ConnectionCredentials = OAuthTokens | ImapCredentials;
+export type ConnectionCredentials = OAuthTokens | ImapCredentials | GasCredentials;
 
 export type ConnectionStatus = "active" | "revoked" | "error";
 
@@ -30,6 +38,7 @@ export interface StoredAccount {
   email: string;
   name: string | null;
   avatarUrl: string | null;
+  passwordHash: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -91,6 +100,7 @@ export interface Storage {
   getAccount(id: string): Promise<StoredAccount | null>;
   getAccountByEmail(email: string): Promise<StoredAccount | null>;
   upsertAccount(account: StoredAccount): Promise<void>;
+  updateAccountPasswordHash(id: string, passwordHash: string): Promise<void>;
 
   // Email Connections
   getConnection(id: string): Promise<StoredEmailConnection | null>;

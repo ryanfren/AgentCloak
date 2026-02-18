@@ -1,12 +1,16 @@
+import { randomBytes } from "node:crypto";
 import { Hono } from "hono";
 import { ImapFlow } from "imapflow";
 import { nanoid } from "nanoid";
 import type { Config } from "../config.js";
+import { isGoogleOAuthConfigured } from "../config.js";
 import { createApiKey } from "../auth/keys.js";
 import { sessionMiddleware, type SessionEnv } from "../auth/session.js";
+import { GasProvider } from "../providers/gas/client.js";
+import { generateGasScript } from "../providers/gas/script-template.js";
 import { encryptPassword } from "../providers/imap/crypto.js";
 import { generateConnectAuthUrl } from "../providers/gmail/oauth.js";
-import type { ImapCredentials, Storage } from "../storage/types.js";
+import type { GasCredentials, ImapCredentials, Storage } from "../storage/types.js";
 
 export function createApiRoutes(storage: Storage, config: Config) {
   const api = new Hono<SessionEnv>();
@@ -47,6 +51,9 @@ export function createApiRoutes(storage: Storage, config: Config) {
 
   // GET /api/connections/gmail/connect — Initiate Gmail OAuth
   api.get("/connections/gmail/connect", (c) => {
+    if (!isGoogleOAuthConfigured(config)) {
+      return c.json({ error: "Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI." }, 400);
+    }
     const accountId = c.get("accountId");
     const url = generateConnectAuthUrl(config, accountId);
     return c.redirect(url);
@@ -216,6 +223,142 @@ export function createApiRoutes(storage: Storage, config: Config) {
         id: connId,
         email: body.username,
         provider: providerKey,
+        displayName: body.displayName || null,
+        status: "active",
+        createdAt: now,
+      },
+      201,
+    );
+  });
+
+  // GET /api/connections/gas/script — Generate GAS script + secret
+  api.get("/connections/gas/script", (_c) => {
+    const secret = randomBytes(32).toString("hex");
+    const script = generateGasScript(secret);
+    return _c.json({ secret, script });
+  });
+
+  // POST /api/connections/gas/test — Test GAS endpoint
+  api.post("/connections/gas/test", async (c) => {
+    const body = await c.req.json<{ endpointUrl: string; secret: string }>();
+
+    if (!body.endpointUrl || !body.secret) {
+      return c.json({ success: false, error: "Missing required fields" }, 400);
+    }
+
+    const urlError = validateGasUrl(body.endpointUrl);
+    if (urlError) {
+      return c.json({ success: false, error: urlError }, 400);
+    }
+
+    try {
+      const result = await GasProvider.ping(body.endpointUrl, body.secret);
+      return c.json({ success: true, email: result.email });
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Connection test failed";
+      return c.json({ success: false, error: message });
+    }
+  });
+
+  // POST /api/connections/gas/connect — Connect GAS account
+  api.post("/connections/gas/connect", async (c) => {
+    const accountId = c.get("accountId");
+    const body = await c.req.json<{
+      endpointUrl: string;
+      secret: string;
+      displayName?: string;
+    }>();
+
+    if (!body.endpointUrl || !body.secret) {
+      return c.json({ error: "Missing required fields" }, 400);
+    }
+
+    const urlError = validateGasUrl(body.endpointUrl);
+    if (urlError) {
+      return c.json({ error: urlError }, 400);
+    }
+
+    // Ping to verify + get email
+    let email: string;
+    try {
+      const result = await GasProvider.ping(body.endpointUrl, body.secret);
+      email = result.email;
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Connection failed";
+      return c.json({ error: `GAS connection failed: ${message}` }, 400);
+    }
+
+    const encrypted = encryptPassword(body.secret, config.sessionSecret);
+    const credentials: GasCredentials = {
+      type: "gas",
+      endpointUrl: body.endpointUrl,
+      encryptedSecret: encrypted.encryptedPassword,
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+    };
+
+    // Check for existing connection (re-authorization)
+    const existing = await storage.getConnectionByEmail(email, "gas");
+    if (existing && existing.accountId === accountId) {
+      await storage.updateConnectionTokens(existing.id, credentials);
+      await storage.updateConnectionStatus(existing.id, "active");
+      if (body.displayName !== undefined) {
+        await storage.updateConnectionDisplayName(
+          existing.id,
+          body.displayName || null,
+        );
+      }
+      const updated = await storage.getConnection(existing.id);
+      return c.json({
+        id: updated!.id,
+        email: updated!.email,
+        provider: updated!.provider,
+        displayName: updated!.displayName,
+        status: updated!.status,
+        createdAt: updated!.createdAt,
+      });
+    }
+
+    // Create new connection
+    const connId = nanoid();
+    const now = Date.now();
+    await storage.createConnection({
+      id: connId,
+      accountId,
+      email,
+      provider: "gas",
+      displayName: body.displayName || null,
+      tokens: credentials,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+
+    // Create default filter config
+    await storage.upsertFilterConfig({
+      connectionId: connId,
+      blockedDomains: [],
+      blockedSenderPatterns: [],
+      blockedSubjectPatterns: [],
+      piiRedactionEnabled: true,
+      injectionDetectionEnabled: true,
+      emailRedactionEnabled: true,
+      showFilteredCount: true,
+      securityBlockingEnabled: true,
+      financialBlockingEnabled: true,
+      sensitiveSenderBlockingEnabled: true,
+      dollarAmountRedactionEnabled: true,
+      attachmentFilteringEnabled: true,
+      allowedFolders: [],
+    });
+
+    return c.json(
+      {
+        id: connId,
+        email,
+        provider: "gas",
         displayName: body.displayName || null,
         status: "active",
         createdAt: now,
@@ -472,6 +615,27 @@ export function createApiRoutes(storage: Storage, config: Config) {
 
 const BLOCKED_HOST_PATTERN =
   /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|0\.0\.0\.0|\[::1\])$/i;
+
+function validateGasUrl(url: string): string | null {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:") {
+      return "URL must use HTTPS";
+    }
+    const host = parsed.hostname;
+    if (
+      host !== "script.google.com" &&
+      !host.endsWith(".script.google.com") &&
+      host !== "script.googleusercontent.com" &&
+      !host.endsWith(".script.googleusercontent.com")
+    ) {
+      return "URL must be on script.google.com or script.googleusercontent.com";
+    }
+    return null;
+  } catch {
+    return "Invalid URL";
+  }
+}
 
 function validateImapInput(host: string, port: number): string | null {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {

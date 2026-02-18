@@ -1,6 +1,6 @@
 # AgentCloak
 
-An open-source proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens and IMAP credentials server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
+An open-source proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens, IMAP credentials, and Apps Script secrets server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
 
 ## Key Safety Features
 
@@ -13,7 +13,7 @@ An open-source proxy service that sits between AI agents and your email. AgentCl
 - **Thread reply auto-population** — When an agent creates a draft reply to a thread, recipients are auto-populated server-side from the thread's participants. The agent never needs to see or handle email addresses.
 - **HTML & Unicode sanitization** — HTML is converted to plaintext. Dangerous Unicode characters (zero-width chars, bidi overrides, tag characters) that could be used for prompt injection are stripped.
 - **Prompt injection detection** — Known injection patterns in email content are detected and flagged with warnings.
-- **Credentials stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens and IMAP credentials are stored in encrypted SQLite and never exposed through the MCP interface.
+- **Credentials stay server-side** — Agents authenticate with API keys. Gmail OAuth tokens, IMAP credentials, and Apps Script secrets are encrypted at rest in SQLite and never exposed through the MCP interface.
 - **Web dashboard** — All filter settings, API keys, and connections are managed through a browser-based dashboard. Agents cannot access or modify these settings.
 
 ## How It Works
@@ -29,6 +29,7 @@ AgentCloak Server
   ├── Attachment filtering & folder restriction
   ├── Email address redaction (structured fields + body text)
   ├── Gmail provider (OAuth2, token refresh)
+  ├── Apps Script provider (no Google Cloud project needed)
   ├── IMAP provider (encrypted credentials)
   ├── Web dashboard (React + Tailwind)
   └── SQLite storage (tokens, API keys, filter configs)
@@ -64,7 +65,7 @@ agentcloak/
 ├── packages/
 │   ├── server/          # Core proxy server (Hono + MCP SDK)
 │   ├── web/             # Web dashboard (React + Tailwind + Vite)
-│   ├── cli/             # CLI for setup, key management, filters
+│   ├── cli/             # CLI for setup, key management, filters, password reset
 │   └── mcp-stdio/       # Stdio proxy for stdio-only environments
 └── deploy/
     ├── docker/          # Docker deployment
@@ -76,7 +77,9 @@ agentcloak/
 ### Prerequisites
 
 - **Node.js 20+** and **pnpm 10+**
-- **IMAP credentials** (optional) — If connecting a non-Gmail account, you'll need the IMAP host, port, and an app-specific password from your email provider.
+- **IMAP credentials** (optional) — If connecting a non-Gmail account via IMAP, you'll need the IMAP host, port, and an app-specific password from your email provider.
+
+> **Tip:** Google OAuth is entirely optional. You can sign in to the dashboard with email/password and connect email via IMAP or Apps Script — no Google Cloud project needed. Only set up Google OAuth if you want "Sign in with Google" on the dashboard or want to connect a Gmail account via OAuth.
 
 ### 1. Install
 
@@ -86,9 +89,13 @@ cd agentcloak
 pnpm install
 ```
 
-### 2. Set up Google Cloud project
+### 2. Set up Google Cloud project (optional)
 
-Google OAuth is required for signing in to the dashboard (even if you only plan to use IMAP email accounts). If you also want to connect a Gmail account, the same project handles that too.
+Google OAuth is **optional**. You only need it if you want:
+- "Sign in with Google" on the dashboard (email/password works without it)
+- Gmail OAuth as an email connection method (IMAP and Apps Script work without it)
+
+If you don't need either, skip to [step 3](#3-configure-environment).
 
 **Create a project and enable the Gmail API:**
 
@@ -141,21 +148,23 @@ Google OAuth is required for signing in to the dashboard (even if you only plan 
 cp .env.example .env
 ```
 
-Edit `.env` with your Google OAuth credentials and a session secret:
+Edit `.env`:
 
 ```bash
 # Required — random string, 32+ characters (used for session cookies)
 SESSION_SECRET=change-me-to-a-random-string-at-least-32-chars
 
-# Required — Google OAuth credentials from step 2
-GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
-GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
-
 # Server
 BASE_URL=http://localhost:3000
 PORT=3000
+
+# Optional — Google OAuth credentials (only needed for Google sign-in and Gmail OAuth connections)
+# GOOGLE_CLIENT_ID=your-client-id.apps.googleusercontent.com
+# GOOGLE_CLIENT_SECRET=GOCSPX-your-secret
+# GOOGLE_REDIRECT_URI=http://localhost:3000/auth/callback
 ```
+
+Without the Google OAuth variables, the dashboard shows only email/password sign-in. With them, both methods are available.
 
 ### 4. Build and start the server
 
@@ -168,13 +177,20 @@ The SQLite database is created automatically at `data/agentcloak.db` on first ru
 
 ### 5. Sign in to the dashboard
 
-Open **http://localhost:3000** and click **"Sign in with Google"**. This creates your account and starts a session. The dashboard is where you manage everything — connections, API keys, and filters.
+Open **http://localhost:3000**. You can create an account with email/password, or use "Sign in with Google" if you configured Google OAuth in step 2. The dashboard is where you manage connections, API keys, and filters.
+
+> **Password reset:** Since AgentCloak runs locally without an email service, use the CLI to reset passwords:
+> ```bash
+> agentcloak reset-password --email user@example.com
+> ```
+> This prompts for a new password and invalidates all existing sessions.
 
 ### 6. Connect an email account
 
 From the **Connections** page:
 
-- **Gmail** — Click "Connect Gmail". You'll authorize read-only access through Google OAuth. AgentCloak stores the OAuth tokens server-side.
+- **Gmail (OAuth)** — Click "Connect Gmail". You'll authorize read-only access through Google OAuth. AgentCloak stores the OAuth tokens server-side. Requires the Google Cloud project from step 2.
+- **Gmail (Apps Script)** — Click "Connect via Apps Script". This is the fastest way to connect Gmail — no Google Cloud project needed for email access. You copy a generated script into [script.google.com](https://script.google.com), authorize it with one click, deploy it as a web app, and paste the URL back. See [Apps Script setup](#apps-script-setup) below for details.
 - **IMAP** — Click "Add IMAP Account". Enter your server details (host, port, username, app password). You can test the connection before saving. Credentials are encrypted and stored in SQLite.
 
 ### 7. Create an API key
@@ -243,6 +259,61 @@ Custom rules can also be managed via the CLI:
 agentcloak filters add-domain example.com --user-id <your-id>
 agentcloak filters add-subject "confidential" --user-id <your-id>
 ```
+
+## CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `agentcloak setup` | Interactive setup wizard (saves server URL and API key) |
+| `agentcloak connect <provider>` | Open browser to connect an email provider |
+| `agentcloak keys create <name>` | Create an API key (direct SQLite access) |
+| `agentcloak keys list` | List all API keys |
+| `agentcloak keys revoke <prefix>` | Revoke an API key by prefix |
+| `agentcloak filters show` | Show filter config for a connection |
+| `agentcloak filters add-domain <domain>` | Add a blocked domain |
+| `agentcloak filters add-subject <pattern>` | Add a blocked subject pattern |
+| `agentcloak reset-password --email <email>` | Reset password for an account (prompts for new password, invalidates sessions) |
+| `agentcloak status` | Check if the server is running |
+
+## Apps Script Setup
+
+The Apps Script provider lets you connect Gmail without setting up a Google Cloud project. Instead of OAuth, it uses a Google Apps Script deployed as a web app to bridge AgentCloak to your Gmail. The full filter pipeline still runs on the AgentCloak side — the script just handles the Gmail API calls.
+
+**When to use this:** You want the fastest path to connecting Gmail, or you don't want to deal with the Google Cloud Console, consent screens, and test user management.
+
+**When to use OAuth instead:** You already have a Google Cloud project set up, or you prefer not to have a separate Apps Script deployment to manage.
+
+### Steps
+
+1. In the AgentCloak dashboard, click **"Connect via Apps Script"**.
+2. A script is generated with a unique secret key. Click **"Copy Script"**.
+3. Go to [script.google.com](https://script.google.com) and create a new project.
+4. Delete the default code and paste the copied script. Click **Save** (or Ctrl/Cmd+S).
+5. Click **Run**. A dialog will ask you to authorize the script:
+   - Click **"Review permissions"** and select your Google account.
+   - Google will show a **"Google hasn't verified this app"** warning. This is expected — you wrote the script yourself, it's not a published app.
+   - Click **"Advanced"** (at the bottom left of the warning).
+   - Click **"Go to \<project name\> (unsafe)"** at the very bottom.
+   - A Google authorization dialog will appear asking for Gmail permissions. **Check the checkbox** to grant access, then click **"Continue"**.
+6. After the script finishes running (you'll see "Execution completed" in the log), click **Deploy > New deployment**.
+7. Set the type to **Web app**, "Execute as" to **Me**, and "Who has access" to **Anyone**.
+8. Click **Deploy** and copy the deployment URL.
+9. Back in AgentCloak, paste the URL and click **"Test Connection"**. You should see your email address confirmed.
+10. Click **"Connect"**.
+
+The connection now works identically to Gmail OAuth — all the same MCP tools, filters, and safety features apply.
+
+### How it works
+
+The generated script contains a secret that authenticates requests between AgentCloak and the script. The secret is encrypted at rest in AgentCloak's database (same as IMAP credentials). The script runs under your Google account and uses `GmailApp` to search, read, and create drafts. AgentCloak sends requests to the script's web app URL, and the script returns email data that passes through AgentCloak's filter pipeline before reaching the agent.
+
+### Limitations compared to Gmail OAuth
+
+- **GAS execution limits** — Google Apps Script has a 6-minute execution time limit per request. Complex queries on large mailboxes may be slower.
+- **Search returns max 500 threads** — `GmailApp.search()` has a 500-thread cap per query. For most use cases this is sufficient.
+- **No push notifications** — Polling only. There's no real-time notification when new emails arrive.
+- **Script redeployment** — If the script template is updated in a future AgentCloak version, you'll need to copy the new script and create a new deployment.
+- **Result count is estimated** — The total result count is a minimum estimate, not an exact count.
 
 ## Current Limitations
 

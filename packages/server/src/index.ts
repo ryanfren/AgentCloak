@@ -10,6 +10,7 @@ import { logger } from "hono/logger";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig } from "./config.js";
 import { handleMcpRequest } from "./mcp/route.js";
+import { createAuthRoutes } from "./routes/auth.js";
 import { createOAuthRoutes } from "./routes/oauth.js";
 import { createApiRoutes } from "./routes/api.js";
 import { createStorage } from "./storage/index.js";
@@ -44,7 +45,10 @@ async function main() {
     return c.json({ status: "ok", version: "0.1.0" });
   });
 
-  // OAuth routes (no API key required)
+  // Auth routes (email/password register + login, config)
+  app.route("/auth", createAuthRoutes(storage, config));
+
+  // OAuth routes (Google login + connect)
   app.route("/auth", createOAuthRoutes(storage, config));
 
   // Dashboard API routes (session auth)

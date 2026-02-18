@@ -2,6 +2,7 @@ import { getCookie } from "hono/cookie";
 import { Hono } from "hono";
 import { nanoid } from "nanoid";
 import type { Config } from "../config.js";
+import { isGoogleOAuthConfigured } from "../config.js";
 import {
   clearSessionCookie,
   createSessionAndSetCookie,
@@ -18,12 +19,18 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
 
   // GET /auth/login — Dashboard login via Google
   routes.get("/login", (c) => {
+    if (!isGoogleOAuthConfigured(config)) {
+      return c.redirect("/login?error=google_not_configured");
+    }
     const url = generateLoginAuthUrl(config);
     return c.redirect(url);
   });
 
   // GET /auth/callback — Unified OAuth callback for login + connect
   routes.get("/callback", async (c) => {
+    if (!isGoogleOAuthConfigured(config)) {
+      return c.json({ error: "Google OAuth is not configured" }, 400);
+    }
     const code = c.req.query("code");
     const state = c.req.query("state");
     const error = c.req.query("error");
@@ -60,6 +67,7 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
         email: result.email,
         name: result.name,
         avatarUrl: result.avatarUrl,
+        passwordHash: null,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
       });

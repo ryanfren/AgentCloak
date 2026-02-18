@@ -13,7 +13,7 @@ import type {
   StoredSession,
 } from "./types.js";
 
-const CURRENT_SCHEMA_VERSION = 3;
+const CURRENT_SCHEMA_VERSION = 4;
 
 export class SqliteStorage implements Storage {
   private db: Database.Database;
@@ -38,13 +38,17 @@ export class SqliteStorage implements Storage {
       // Old schema exists — run migration
       this.migrateFromV1();
       this.migrateFromV2ToV3();
+      this.migrateFromV3ToV4();
     } else if (version === 0) {
       // Fresh install — create new schema directly
-      this.createSchemaV3();
+      this.createSchemaV4();
     } else if (version <= 2) {
       this.migrateFromV2ToV3();
+      this.migrateFromV3ToV4();
+    } else if (version === 3) {
+      this.migrateFromV3ToV4();
     }
-    // version >= 3: already up to date
+    // version >= 4: already up to date
   }
 
   private getSchemaVersion(): number {
@@ -75,13 +79,14 @@ export class SqliteStorage implements Storage {
     return !!row;
   }
 
-  private createSchemaV3(): void {
+  private createSchemaV4(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS accounts (
         id TEXT PRIMARY KEY,
         email TEXT NOT NULL UNIQUE,
         name TEXT,
         avatar_url TEXT,
+        password_hash TEXT,
         created_at INTEGER NOT NULL,
         updated_at INTEGER NOT NULL
       );
@@ -314,11 +319,27 @@ export class SqliteStorage implements Storage {
       addIfMissing("dollar_amount_redaction_enabled", "INTEGER NOT NULL DEFAULT 1");
       addIfMissing("attachment_filtering_enabled", "INTEGER NOT NULL DEFAULT 1");
       addIfMissing("allowed_folders_json", "TEXT NOT NULL DEFAULT '[]'");
-      this.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+      this.setSchemaVersion(3);
     });
 
     migrate();
     console.log("Database migrated from v2 to v3 (filter category toggles)");
+  }
+
+  private migrateFromV3ToV4(): void {
+    const migrate = this.db.transaction(() => {
+      const tableInfo = this.db.pragma("table_info(accounts)") as Array<{
+        name: string;
+      }>;
+      const columns = new Set(tableInfo.map((col) => col.name));
+      if (!columns.has("password_hash")) {
+        this.db.exec("ALTER TABLE accounts ADD COLUMN password_hash TEXT");
+      }
+      this.setSchemaVersion(CURRENT_SCHEMA_VERSION);
+    });
+
+    migrate();
+    console.log("Database migrated from v3 to v4 (password_hash column)");
   }
 
   // ── Accounts ──
@@ -340,11 +361,12 @@ export class SqliteStorage implements Storage {
   async upsertAccount(account: StoredAccount): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO accounts (id, email, name, avatar_url, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)
+        `INSERT INTO accounts (id, email, name, avatar_url, password_hash, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT(email) DO UPDATE SET
            name = excluded.name,
            avatar_url = excluded.avatar_url,
+           password_hash = COALESCE(excluded.password_hash, accounts.password_hash),
            updated_at = excluded.updated_at`,
       )
       .run(
@@ -352,9 +374,21 @@ export class SqliteStorage implements Storage {
         account.email,
         account.name,
         account.avatarUrl,
+        account.passwordHash,
         account.createdAt,
         account.updatedAt,
       );
+  }
+
+  async updateAccountPasswordHash(
+    id: string,
+    passwordHash: string,
+  ): Promise<void> {
+    this.db
+      .prepare(
+        "UPDATE accounts SET password_hash = ?, updated_at = ? WHERE id = ?",
+      )
+      .run(passwordHash, Date.now(), id);
   }
 
   // ── Email Connections ──
@@ -623,6 +657,7 @@ export class SqliteStorage implements Storage {
       email: row.email as string,
       name: (row.name as string) ?? null,
       avatarUrl: (row.avatar_url as string) ?? null,
+      passwordHash: (row.password_hash as string) ?? null,
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     };

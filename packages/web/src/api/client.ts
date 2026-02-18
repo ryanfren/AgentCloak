@@ -26,6 +26,27 @@ async function request<T>(
   return res.json() as Promise<T>;
 }
 
+export interface AuthConfig {
+  googleOAuth: boolean;
+  emailPassword: boolean;
+}
+
+export const authApi = {
+  getAuthConfig: () => request<AuthConfig>("/auth/config"),
+
+  register: (data: { email: string; password: string; name?: string }) =>
+    request<Account>("/auth/register", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  loginWithPassword: (data: { email: string; password: string }) =>
+    request<Account>("/auth/login", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+};
+
 export const api = {
   getMe: () => request<Account>("/api/me"),
 
@@ -90,6 +111,25 @@ export const api = {
     displayName?: string;
   }) =>
     request<Connection>("/api/connections/imap/connect", {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  getGasScript: () =>
+    request<{ secret: string; script: string }>("/api/connections/gas/script"),
+
+  testGasConnection: (data: { endpointUrl: string; secret: string }) =>
+    request<{ success: boolean; email?: string; error?: string }>(
+      "/api/connections/gas/test",
+      { method: "POST", body: JSON.stringify(data) },
+    ),
+
+  connectGas: (data: {
+    endpointUrl: string;
+    secret: string;
+    displayName?: string;
+  }) =>
+    request<Connection>("/api/connections/gas/connect", {
       method: "POST",
       body: JSON.stringify(data),
     }),

@@ -25,6 +25,9 @@ export interface OAuthStateData {
 export function createOAuth2Client(
   config: Config,
 ): InstanceType<typeof google.auth.OAuth2> {
+  if (!config.googleClientId || !config.googleClientSecret || !config.googleRedirectUri) {
+    throw new Error("Google OAuth is not configured. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and GOOGLE_REDIRECT_URI.");
+  }
   return new google.auth.OAuth2(
     config.googleClientId,
     config.googleClientSecret,

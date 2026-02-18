@@ -3,10 +3,11 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import type { IncomingMessage, ServerResponse } from "node:http";
 import type { Config } from "../config.js";
 import { FilterPipeline } from "../filters/pipeline.js";
+import { GasProvider } from "../providers/gas/client.js";
 import { GmailProvider } from "../providers/gmail/client.js";
 import { ImapProvider } from "../providers/imap/client.js";
 import type { EmailProvider } from "../providers/types.js";
-import type { ImapCredentials, OAuthTokens, Storage, StoredEmailConnection } from "../storage/types.js";
+import type { GasCredentials, ImapCredentials, OAuthTokens, Storage, StoredEmailConnection } from "../storage/types.js";
 import { registerAllTools } from "./tools/index.js";
 
 export async function handleMcpRequest(
@@ -89,6 +90,10 @@ function createProvider(
       connection.id,
       storage,
     );
+  }
+
+  if (connection.provider === "gas") {
+    return new GasProvider(connection.tokens as GasCredentials, config.sessionSecret);
   }
 
   if (connection.provider === "imap" || connection.provider.startsWith("imap:")) {

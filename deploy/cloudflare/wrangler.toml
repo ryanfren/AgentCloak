@@ -1,0 +1,14 @@
+name = "agentcloak"
+main = "../../packages/server/dist/index.js"
+compatibility_date = "2024-12-01"
+
+[vars]
+BASE_URL = "https://agentcloak.your-domain.workers.dev"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "agentcloak"
+database_id = "<your-d1-database-id>"
+
+# Note: Cloudflare Workers deployment requires a D1 storage adapter
+# (not yet implemented - see Phase 5). For now, use Docker deployment.

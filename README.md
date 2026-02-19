@@ -1,5 +1,7 @@
 # AgentCloak
 
+> **Don't want to set it up yourself?** Try the hosted version at [agentcloak.up.railway.app](https://agentcloak.up.railway.app/)
+
 A source-available proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens, IMAP credentials, and Apps Script secrets server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
 
 ## Key Safety Features

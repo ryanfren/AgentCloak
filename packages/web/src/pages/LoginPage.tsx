@@ -2,6 +2,9 @@ import { Shield } from "lucide-react";
 import { useEffect, useState } from "react";
 import { authApi, type AuthConfig } from "../api/client";
 
+const GOOGLE_OAUTH_INVITE_ONLY =
+  import.meta.env.VITE_GOOGLE_OAUTH_INVITE_ONLY === "true";
+
 export function LoginPage() {
   const [authConfig, setAuthConfig] = useState<AuthConfig | null>(null);
   const [mode, setMode] = useState<"login" | "register">("login");
@@ -140,12 +143,30 @@ export function LoginPage() {
         )}
 
         {authConfig?.googleOAuth && (
-          <a
-            href="/auth/login"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
-          >
-            Sign in with Google
-          </a>
+          <>
+            <a
+              href="/auth/login"
+              className="inline-flex w-full items-center justify-center gap-2 rounded-md bg-zinc-100 px-4 py-2.5 text-sm font-medium text-zinc-900 transition-colors hover:bg-zinc-200"
+            >
+              Sign in with Google
+            </a>
+            {GOOGLE_OAUTH_INVITE_ONLY && (
+              <p className="mt-2 text-center text-xs text-amber-400/80">
+                Google sign-in is invite-only during beta — use
+                email/password above to get started.{" "}
+                <a
+                  href="/#contact"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.location.href = "/#contact";
+                  }}
+                  className="underline hover:text-amber-300"
+                >
+                  Request Google access
+                </a>
+              </p>
+            )}
+          </>
         )}
 
         {!authConfig && (

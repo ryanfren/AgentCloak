@@ -7,6 +7,9 @@ import { Card } from "../components/Card";
 import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 
+const GOOGLE_OAUTH_INVITE_ONLY =
+  import.meta.env.VITE_GOOGLE_OAUTH_INVITE_ONLY === "true";
+
 export function ConnectionsPage() {
   const navigate = useNavigate();
   const [connections, setConnections] = useState<Connection[]>([]);
@@ -14,6 +17,7 @@ export function ConnectionsPage() {
   const [imapModalOpen, setImapModalOpen] = useState(false);
   const [gasModalOpen, setGasModalOpen] = useState(false);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
+  const [oauthGateOpen, setOauthGateOpen] = useState(false);
   const addMenuRef = useRef<HTMLDivElement>(null);
 
   const load = () => {
@@ -71,24 +75,6 @@ export function ConnectionsPage() {
               <button
                 onClick={() => {
                   setAddMenuOpen(false);
-                  setGasModalOpen(true);
-                }}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
-              >
-                <Zap className="h-4 w-4 text-amber-500" />
-                Gmail (Apps Script)
-              </button>
-              <a
-                href="/api/connections/gmail/connect"
-                onClick={() => setAddMenuOpen(false)}
-                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
-              >
-                <Mail className="h-4 w-4 text-zinc-400" />
-                Gmail (OAuth)
-              </a>
-              <button
-                onClick={() => {
-                  setAddMenuOpen(false);
                   setImapModalOpen(true);
                 }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
@@ -96,6 +82,45 @@ export function ConnectionsPage() {
                 <Server className="h-4 w-4 text-zinc-400" />
                 IMAP
               </button>
+              <button
+                onClick={() => {
+                  setAddMenuOpen(false);
+                  setGasModalOpen(true);
+                }}
+                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+              >
+                <Zap className="h-4 w-4 text-amber-500" />
+                Gmail (Apps Script)
+              </button>
+              {GOOGLE_OAUTH_INVITE_ONLY && (
+                <div className="my-1 border-t border-zinc-700" />
+              )}
+              {GOOGLE_OAUTH_INVITE_ONLY ? (
+                <button
+                  onClick={() => {
+                    setAddMenuOpen(false);
+                    setOauthGateOpen(true);
+                  }}
+                  className="flex w-full items-center justify-between px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+                >
+                  <span className="flex items-center gap-2">
+                    <Mail className="h-4 w-4 text-zinc-400" />
+                    Gmail (OAuth)
+                  </span>
+                  <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-400 border border-amber-500/20">
+                    Invite
+                  </span>
+                </button>
+              ) : (
+                <a
+                  href="/api/connections/gmail/connect"
+                  onClick={() => setAddMenuOpen(false)}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-zinc-300 hover:bg-zinc-700"
+                >
+                  <Mail className="h-4 w-4 text-zinc-400" />
+                  Gmail (OAuth)
+                </a>
+              )}
             </div>
           )}
         </div>
@@ -180,6 +205,79 @@ export function ConnectionsPage() {
           navigate(`/connections/${connectionId}`);
         }}
       />
+
+      {GOOGLE_OAUTH_INVITE_ONLY && (
+        <Modal
+          open={oauthGateOpen}
+          onClose={() => setOauthGateOpen(false)}
+          title="Gmail OAuth is invite-only"
+        >
+          <div className="space-y-4">
+            <p className="text-sm text-zinc-400">
+              Google OAuth requires manual approval during our beta period. In
+              the meantime, these options work with any Gmail account:
+            </p>
+            <div className="space-y-2">
+              <button
+                onClick={() => {
+                  setOauthGateOpen(false);
+                  setImapModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-md border border-zinc-700 px-3 py-2.5 text-left transition-colors hover:bg-zinc-800"
+              >
+                <Server className="h-4 w-4 shrink-0 text-zinc-400" />
+                <div>
+                  <div className="text-sm font-medium text-zinc-200">IMAP</div>
+                  <div className="text-xs text-zinc-500">
+                    Works with any email provider
+                  </div>
+                </div>
+              </button>
+              <button
+                onClick={() => {
+                  setOauthGateOpen(false);
+                  setGasModalOpen(true);
+                }}
+                className="flex w-full items-center gap-3 rounded-md border border-zinc-700 px-3 py-2.5 text-left transition-colors hover:bg-zinc-800"
+              >
+                <Zap className="h-4 w-4 shrink-0 text-amber-500" />
+                <div>
+                  <div className="text-sm font-medium text-zinc-200">
+                    Gmail (Apps Script)
+                  </div>
+                  <div className="text-xs text-zinc-500">
+                    Manual setup via script.google.com
+                  </div>
+                </div>
+              </button>
+            </div>
+            <div className="border-t border-zinc-800 pt-4">
+              <p className="text-xs text-zinc-500">
+                Already have an invite?{" "}
+                <a
+                  href="/api/connections/gmail/connect"
+                  className="text-emerald-400 hover:underline"
+                >
+                  Continue with OAuth
+                </a>
+              </p>
+              <p className="mt-1 text-xs text-zinc-500">
+                Want OAuth access?{" "}
+                <a
+                  href="/#contact"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    window.location.href = "/#contact";
+                  }}
+                  className="text-amber-400 hover:underline"
+                >
+                  Contact us to request an invite
+                </a>
+              </p>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }

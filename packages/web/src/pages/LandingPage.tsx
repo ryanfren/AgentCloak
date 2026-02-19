@@ -130,6 +130,22 @@ const faqs: { question: string; answer: React.ReactNode }[] = [
       "AgentCloak is a source-available MCP (Model Context Protocol) proxy for email. It sits between AI agents and your inbox, holding credentials server-side while filtering sensitive content before it reaches the agent.",
   },
   {
+    question: "Is AgentCloak in beta?",
+    answer: (
+      <>
+        Yes. You can create an account with your email address and connect any
+        IMAP email account right now — no invite needed. However, signing in
+        with Google and connecting Gmail via Google OAuth are currently
+        invite-only while our OAuth app is in review. If you'd like OAuth
+        access,{" "}
+        <a href="#contact" className="text-emerald-400 hover:underline">
+          contact us
+        </a>{" "}
+        to request an invite.
+      </>
+    ),
+  },
+  {
     question: "Which email providers are supported?",
     answer: "Gmail via OAuth and any IMAP-compatible email server.",
   },
@@ -345,6 +361,15 @@ function FAQItem({
 export function LandingPage() {
   const { account, loading } = useAuth();
 
+  // Scroll to hash fragment after mount (e.g. /#contact from other pages)
+  useEffect(() => {
+    const hash = window.location.hash;
+    if (hash) {
+      const el = document.querySelector(hash);
+      if (el) el.scrollIntoView({ behavior: "smooth" });
+    }
+  }, []);
+
   return (
     <div className="min-h-screen bg-zinc-950 text-zinc-100">
       {/* Nav */}
@@ -412,7 +437,7 @@ export function LandingPage() {
             A source-available MCP proxy that holds credentials server-side, filters
             sensitive content, redacts PII, and detects prompt injection — so
             your AI agents can read email without accessing anything they
-            shouldn't.
+            shouldn't. Now in invite-only beta.
           </p>
           <div className="mt-10 flex items-center justify-center gap-4">
             <Link

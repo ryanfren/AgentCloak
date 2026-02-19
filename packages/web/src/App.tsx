@@ -3,6 +3,7 @@ import { AuthProvider } from "./auth/AuthContext";
 import { RequireAuth } from "./auth/RequireAuth";
 import { Layout } from "./components/Layout";
 import { LoginPage } from "./pages/LoginPage";
+import { LandingPage } from "./pages/LandingPage";
 import { OverviewPage } from "./pages/OverviewPage";
 import { ConnectionsPage } from "./pages/ConnectionsPage";
 import { ConnectionDetailPage } from "./pages/ConnectionDetailPage";
@@ -13,6 +14,7 @@ export function App() {
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          <Route path="/" element={<LandingPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route
             element={
@@ -21,7 +23,7 @@ export function App() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<OverviewPage />} />
+            <Route path="/dashboard" element={<OverviewPage />} />
             <Route path="/connections" element={<ConnectionsPage />} />
             <Route
               path="/connections/:id"

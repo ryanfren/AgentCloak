@@ -80,38 +80,16 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
         config,
         finalAccount!.id,
       );
-      return c.redirect("/");
+      return c.redirect("/dashboard");
     }
 
     if (verified.flow === "connect") {
-      // Connect Gmail flow — accountId comes from state
+      // Connect Gmail flow — always create a new connection
       const { accountId } = verified;
 
-      // Verify the account exists
       const account = await storage.getAccount(accountId);
       if (!account) {
         return c.redirect("/connections?error=invalid_account");
-      }
-
-      // Check if this email is already connected
-      const existingConn = await storage.getConnectionByEmail(
-        result.email,
-        "gmail",
-      );
-      if (existingConn) {
-        // Only allow updating if the connection belongs to this account
-        if (existingConn.accountId !== accountId) {
-          return c.redirect(
-            "/connections?error=email_connected_by_another_account",
-          );
-        }
-        // Re-authorize existing connection
-        await storage.updateConnectionTokens(
-          existingConn.id,
-          result.tokens,
-        );
-        await storage.updateConnectionStatus(existingConn.id, "active");
-        return c.redirect("/connections");
       }
 
       const connectionId = nanoid(21);
@@ -147,7 +125,22 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
         allowedFolders: [],
       });
 
-      return c.redirect("/connections");
+      return c.redirect(`/connections/${connectionId}`);
+    }
+
+    if (verified.flow === "reauthorize") {
+      const { accountId, connectionId } = verified;
+
+      // Verify account and connection
+      const conn = await storage.getConnection(connectionId);
+      if (!conn || conn.accountId !== accountId) {
+        return c.redirect("/connections?error=invalid_connection");
+      }
+
+      // Update tokens on the existing connection
+      await storage.updateConnectionTokens(conn.id, result.tokens);
+      await storage.updateConnectionStatus(conn.id, "active");
+      return c.redirect(`/connections/${conn.id}`);
     }
 
     return c.redirect("/?error=unknown_flow");

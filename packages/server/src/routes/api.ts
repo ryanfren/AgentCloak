@@ -9,7 +9,7 @@ import { sessionMiddleware, type SessionEnv } from "../auth/session.js";
 import { GasProvider } from "../providers/gas/client.js";
 import { generateGasScript } from "../providers/gas/script-template.js";
 import { encryptPassword } from "../providers/imap/crypto.js";
-import { generateConnectAuthUrl } from "../providers/gmail/oauth.js";
+import { generateConnectAuthUrl, generateReauthorizeAuthUrl } from "../providers/gmail/oauth.js";
 import type { GasCredentials, ImapCredentials, Storage } from "../storage/types.js";
 
 export function createApiRoutes(storage: Storage, config: Config) {
@@ -56,6 +56,27 @@ export function createApiRoutes(storage: Storage, config: Config) {
     }
     const accountId = c.get("accountId");
     const url = generateConnectAuthUrl(config, accountId);
+    return c.redirect(url);
+  });
+
+  // GET /api/connections/:id/reauthorize — Re-authorize Gmail OAuth
+  api.get("/connections/:id/reauthorize", async (c) => {
+    if (!isGoogleOAuthConfigured(config)) {
+      return c.json({ error: "Google OAuth is not configured" }, 400);
+    }
+    const accountId = c.get("accountId");
+    const connectionId = c.req.param("id");
+
+    // Verify connection exists and belongs to this account
+    const conn = await storage.getConnection(connectionId);
+    if (!conn || conn.accountId !== accountId) {
+      return c.json({ error: "Connection not found" }, 404);
+    }
+    if (conn.provider !== "gmail") {
+      return c.json({ error: "Re-authorization is only supported for Gmail connections" }, 400);
+    }
+
+    const url = generateReauthorizeAuthUrl(config, accountId, connectionId);
     return c.redirect(url);
   });
 
@@ -162,28 +183,6 @@ export function createApiRoutes(storage: Storage, config: Config) {
 
     // Provider includes host to allow same email on different servers
     const providerKey = `imap:${body.host}`;
-
-    // Check for existing connection (re-authorization)
-    const existing = await storage.getConnectionByEmail(body.username, providerKey);
-    if (existing && existing.accountId === accountId) {
-      await storage.updateConnectionTokens(existing.id, credentials);
-      await storage.updateConnectionStatus(existing.id, "active");
-      if (body.displayName !== undefined) {
-        await storage.updateConnectionDisplayName(
-          existing.id,
-          body.displayName || null,
-        );
-      }
-      const updated = await storage.getConnection(existing.id);
-      return c.json({
-        id: updated!.id,
-        email: updated!.email,
-        provider: updated!.provider,
-        displayName: updated!.displayName,
-        status: updated!.status,
-        createdAt: updated!.createdAt,
-      });
-    }
 
     // Create new connection
     const connId = nanoid();
@@ -298,28 +297,6 @@ export function createApiRoutes(storage: Storage, config: Config) {
       iv: encrypted.iv,
       authTag: encrypted.authTag,
     };
-
-    // Check for existing connection (re-authorization)
-    const existing = await storage.getConnectionByEmail(email, "gas");
-    if (existing && existing.accountId === accountId) {
-      await storage.updateConnectionTokens(existing.id, credentials);
-      await storage.updateConnectionStatus(existing.id, "active");
-      if (body.displayName !== undefined) {
-        await storage.updateConnectionDisplayName(
-          existing.id,
-          body.displayName || null,
-        );
-      }
-      const updated = await storage.getConnection(existing.id);
-      return c.json({
-        id: updated!.id,
-        email: updated!.email,
-        provider: updated!.provider,
-        displayName: updated!.displayName,
-        status: updated!.status,
-        createdAt: updated!.createdAt,
-      });
-    }
 
     // Create new connection
     const connId = nanoid();

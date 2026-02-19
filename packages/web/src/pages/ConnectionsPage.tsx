@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { Check, ChevronDown, Copy, Mail, Plus, Server, Trash2, Zap } from "lucide-react";
 import { api } from "../api/client";
 import type { Connection } from "../api/types";
@@ -8,6 +8,7 @@ import { Modal } from "../components/Modal";
 import { StatusBadge } from "../components/StatusBadge";
 
 export function ConnectionsPage() {
+  const navigate = useNavigate();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [imapModalOpen, setImapModalOpen] = useState(false);
@@ -165,18 +166,18 @@ export function ConnectionsPage() {
       <ImapModal
         open={imapModalOpen}
         onClose={() => setImapModalOpen(false)}
-        onConnected={() => {
+        onConnected={(connectionId) => {
           setImapModalOpen(false);
-          load();
+          navigate(`/connections/${connectionId}`);
         }}
       />
 
       <GasModal
         open={gasModalOpen}
         onClose={() => setGasModalOpen(false)}
-        onConnected={() => {
+        onConnected={(connectionId) => {
           setGasModalOpen(false);
-          load();
+          navigate(`/connections/${connectionId}`);
         }}
       />
     </div>
@@ -193,7 +194,7 @@ function ImapModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onConnected: () => void;
+  onConnected: (connectionId: string) => void;
 }) {
   const [host, setHost] = useState("");
   const [port, setPort] = useState("993");
@@ -254,7 +255,7 @@ function ImapModal({
     setConnecting(true);
     setError("");
     try {
-      await api.connectImap({
+      const conn = await api.connectImap({
         host,
         port: Number(port),
         username,
@@ -263,7 +264,7 @@ function ImapModal({
         displayName: displayName || undefined,
       });
       reset();
-      onConnected();
+      onConnected(conn.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
     } finally {
@@ -430,7 +431,7 @@ function GasModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onConnected: () => void;
+  onConnected: (connectionId: string) => void;
 }) {
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [secret, setSecret] = useState("");
@@ -500,13 +501,13 @@ function GasModal({
     setLoading(true);
     setError("");
     try {
-      await api.connectGas({
+      const conn = await api.connectGas({
         endpointUrl,
         secret,
         displayName: displayName || undefined,
       });
       reset();
-      onConnected();
+      onConnected(conn.id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Connection failed");
     } finally {

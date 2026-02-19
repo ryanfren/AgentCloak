@@ -2,7 +2,7 @@ import { NavLink } from "react-router-dom";
 import { LayoutDashboard, Link, Settings, Shield } from "lucide-react";
 
 const links = [
-  { to: "/", icon: LayoutDashboard, label: "Overview" },
+  { to: "/dashboard", icon: LayoutDashboard, label: "Overview" },
   { to: "/connections", icon: Link, label: "Connections" },
   { to: "/settings", icon: Settings, label: "Settings" },
 ];
@@ -19,7 +19,7 @@ export function Sidebar() {
           <NavLink
             key={to}
             to={to}
-            end={to === "/"}
+            end={to === "/dashboard"}
             className={({ isActive }) =>
               `flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors ${
                 isActive

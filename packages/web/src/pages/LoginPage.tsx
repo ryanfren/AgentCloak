@@ -37,7 +37,7 @@ export function LoginPage() {
       } else {
         await authApi.loginWithPassword({ email, password });
       }
-      window.location.href = "/";
+      window.location.href = "/dashboard";
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {

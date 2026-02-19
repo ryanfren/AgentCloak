@@ -104,10 +104,6 @@ export interface Storage {
 
   // Email Connections
   getConnection(id: string): Promise<StoredEmailConnection | null>;
-  getConnectionByEmail(
-    email: string,
-    provider: string,
-  ): Promise<StoredEmailConnection | null>;
   listConnections(accountId: string): Promise<StoredEmailConnection[]>;
   createConnection(conn: StoredEmailConnection): Promise<void>;
   updateConnectionTokens(id: string, tokens: ConnectionCredentials): Promise<void>;

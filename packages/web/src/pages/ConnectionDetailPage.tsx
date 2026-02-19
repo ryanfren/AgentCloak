@@ -10,6 +10,55 @@ import { StatusBadge } from "../components/StatusBadge";
 import { TagInput } from "../components/TagInput";
 import { Toggle } from "../components/Toggle";
 
+interface SetupOption {
+  id: string;
+  label: string;
+  hint: string;
+  content: string;
+}
+
+function getSetupOptions(apiKey: string, mcpUrl: string): SetupOption[] {
+  return [
+    {
+      id: "claude-global",
+      label: "Claude Code (Global)",
+      hint: "Run this in your terminal:",
+      content: `claude mcp add --transport http agentcloak --scope user ${mcpUrl} --header "Authorization: Bearer ${apiKey}"`,
+    },
+    {
+      id: "claude-project",
+      label: "Claude Code (Project)",
+      hint: "Run this from your project directory:",
+      content: `claude mcp add --transport http agentcloak ${mcpUrl} --header "Authorization: Bearer ${apiKey}"`,
+    },
+    {
+      id: "openclaw",
+      label: "OpenClaw",
+      hint: "Give this prompt to OpenClaw to set up the connection:",
+      content: `Set up AgentCloak email integration for OpenClaw
+
+I have an AgentCloak MCP server for email access. Since OpenClaw doesn't support MCP natively yet, create a shell wrapper that calls the HTTP endpoint directly via curl.
+
+My AgentCloak API key: ${apiKey}
+
+What to do:
+Create a script at ~/workspace/tools/mcp-email.sh that wraps the AgentCloak MCP HTTP API. The endpoint is ${mcpUrl}. It uses JSON-RPC over HTTP with SSE responses. You need to:
+- Send requests with Authorization: Bearer <api_key> header
+- Include Accept: application/json, text/event-stream header
+- Use tools/call method with tool name and arguments
+- Parse the SSE data: line from the response
+
+First, call the tools/list method to discover what tools are available, then test with a simple query like search_emails with {"query":"is:unread","max_results":5}.
+
+Make the script callable as: mcp-email.sh <tool_name> '<json_params>'
+
+Confirm it works by showing me my latest unread emails.
+
+Available MCP methods for reference: initialize, tools/list, tools/call. The tools/call params format is {"name":"<tool_name>","arguments":{...}}.`,
+    },
+  ];
+}
+
 export function ConnectionDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [connection, setConnection] = useState<Connection | null>(null);
@@ -19,6 +68,7 @@ export function ConnectionDetailPage() {
   const [showCreateKey, setShowCreateKey] = useState(false);
   const [newKeyName, setNewKeyName] = useState("");
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [setupOption, setSetupOption] = useState("claude-global");
   const [infoModal, setInfoModal] = useState<{ title: string; body: string } | null>(null);
 
   const load = useCallback(() => {
@@ -132,6 +182,10 @@ export function ConnectionDetailPage() {
     return <div className="text-zinc-400">Connection not found.</div>;
   }
 
+  const mcpUrl = `${window.location.origin}/mcp`;
+  const setupOptions = createdKey ? getSetupOptions(createdKey, mcpUrl) : [];
+  const selectedSetup = setupOptions.find((o) => o.id === setupOption) ?? setupOptions[0];
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div className="flex items-center gap-3">
@@ -150,6 +204,14 @@ export function ConnectionDetailPage() {
           )}
         </div>
         <StatusBadge status={connection.status} />
+        {connection.provider === "gmail" && (
+          <a
+            href={`/api/connections/${id}/reauthorize`}
+            className="rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700"
+          >
+            Re-authorize
+          </a>
+        )}
       </div>
 
       {/* API Keys */}
@@ -158,7 +220,7 @@ export function ConnectionDetailPage() {
           <h2 className="text-sm font-medium text-zinc-400">API Keys</h2>
           <button
             onClick={() => setShowCreateKey(true)}
-            className="inline-flex items-center gap-1 rounded-md bg-zinc-800 px-2.5 py-1 text-xs font-medium text-zinc-300 transition-colors hover:bg-zinc-700"
+            className="inline-flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-emerald-500"
           >
             <Plus className="h-3 w-3" />
             Create Key
@@ -175,6 +237,34 @@ export function ConnectionDetailPage() {
                 {createdKey}
               </code>
               <CopyButton text={createdKey} />
+            </div>
+            {/* Setup instructions dropdown */}
+            <div className="mt-3 border-t border-emerald-500/10 pt-3">
+              <div className="mb-2 flex items-center gap-2">
+                <span className="text-xs font-medium text-emerald-400">Setup for:</span>
+                <select
+                  value={setupOption}
+                  onChange={(e) => setSetupOption(e.target.value)}
+                  className="rounded-md border border-zinc-700 bg-zinc-800 px-2 py-1 text-xs text-zinc-200 focus:border-emerald-500 focus:outline-none"
+                >
+                  {setupOptions.map((opt) => (
+                    <option key={opt.id} value={opt.id}>{opt.label}</option>
+                  ))}
+                </select>
+              </div>
+              {selectedSetup && (
+                <>
+                  <div className="mb-1 text-xs text-zinc-400">
+                    {selectedSetup.hint}
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <code className="flex-1 whitespace-pre-wrap break-all rounded bg-zinc-800 px-2 py-1 font-mono text-xs text-zinc-200">
+                      {selectedSetup.content}
+                    </code>
+                    <CopyButton text={selectedSetup.content} />
+                  </div>
+                </>
+              )}
             </div>
             <button
               onClick={() => setCreatedKey(null)}

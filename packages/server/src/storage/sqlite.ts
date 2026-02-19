@@ -13,7 +13,7 @@ import type {
   StoredSession,
 } from "./types.js";
 
-const CURRENT_SCHEMA_VERSION = 4;
+const CURRENT_SCHEMA_VERSION = 5;
 
 export class SqliteStorage implements Storage {
   private db: Database.Database;
@@ -39,16 +39,21 @@ export class SqliteStorage implements Storage {
       this.migrateFromV1();
       this.migrateFromV2ToV3();
       this.migrateFromV3ToV4();
+      this.migrateFromV4ToV5();
     } else if (version === 0) {
       // Fresh install — create new schema directly
-      this.createSchemaV4();
+      this.createSchemaV5();
     } else if (version <= 2) {
       this.migrateFromV2ToV3();
       this.migrateFromV3ToV4();
+      this.migrateFromV4ToV5();
     } else if (version === 3) {
       this.migrateFromV3ToV4();
+      this.migrateFromV4ToV5();
+    } else if (version === 4) {
+      this.migrateFromV4ToV5();
     }
-    // version >= 4: already up to date
+    // version >= 5: already up to date
   }
 
   private getSchemaVersion(): number {
@@ -79,7 +84,7 @@ export class SqliteStorage implements Storage {
     return !!row;
   }
 
-  private createSchemaV4(): void {
+  private createSchemaV5(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS accounts (
         id TEXT PRIMARY KEY,
@@ -100,8 +105,7 @@ export class SqliteStorage implements Storage {
         tokens_json TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
         created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        UNIQUE(email, provider)
+        updated_at INTEGER NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS sessions (
@@ -342,6 +346,30 @@ export class SqliteStorage implements Storage {
     console.log("Database migrated from v3 to v4 (password_hash column)");
   }
 
+  private migrateFromV4ToV5(): void {
+    this.db.transaction(() => {
+      // Recreate email_connections without UNIQUE(email, provider)
+      this.db.exec(`
+        CREATE TABLE email_connections_new (
+          id TEXT PRIMARY KEY,
+          account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+          email TEXT NOT NULL,
+          provider TEXT NOT NULL,
+          display_name TEXT,
+          tokens_json TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        INSERT INTO email_connections_new SELECT * FROM email_connections;
+        DROP TABLE email_connections;
+        ALTER TABLE email_connections_new RENAME TO email_connections;
+      `);
+      this.setSchemaVersion(5);
+    })();
+    console.log("Database migrated from v4 to v5 (allow duplicate email+provider)");
+  }
+
   // ── Accounts ──
 
   async getAccount(id: string): Promise<StoredAccount | null> {
@@ -397,18 +425,6 @@ export class SqliteStorage implements Storage {
     const row = this.db
       .prepare("SELECT * FROM email_connections WHERE id = ?")
       .get(id) as Record<string, unknown> | undefined;
-    return row ? this.rowToConnection(row) : null;
-  }
-
-  async getConnectionByEmail(
-    email: string,
-    provider: string,
-  ): Promise<StoredEmailConnection | null> {
-    const row = this.db
-      .prepare(
-        "SELECT * FROM email_connections WHERE email = ? AND provider = ?",
-      )
-      .get(email, provider) as Record<string, unknown> | undefined;
     return row ? this.rowToConnection(row) : null;
   }
 

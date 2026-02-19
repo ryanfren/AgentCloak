@@ -15,11 +15,12 @@ const CONNECT_SCOPES = [
   "https://www.googleapis.com/auth/userinfo.email",
 ];
 
-export type OAuthFlowType = "login" | "connect";
+export type OAuthFlowType = "login" | "connect" | "reauthorize";
 
 export interface OAuthStateData {
   flow: OAuthFlowType;
   accountId: string; // empty string for login flow
+  connectionId: string; // empty string for login/connect flows
 }
 
 export function createOAuth2Client(
@@ -53,6 +54,22 @@ export function generateConnectAuthUrl(
 ): string {
   const client = createOAuth2Client(config);
   const state = signState("connect", accountId, config.sessionSecret);
+
+  return client.generateAuthUrl({
+    access_type: "offline",
+    prompt: "consent",
+    scope: CONNECT_SCOPES,
+    state,
+  });
+}
+
+export function generateReauthorizeAuthUrl(
+  config: Config,
+  accountId: string,
+  connectionId: string,
+): string {
+  const client = createOAuth2Client(config);
+  const state = signState("reauthorize", accountId, config.sessionSecret, connectionId);
 
   return client.generateAuthUrl({
     access_type: "offline",
@@ -107,10 +124,11 @@ export function signState(
   flow: OAuthFlowType,
   accountId: string,
   secret: string,
+  connectionId = "",
 ): string {
   const nonce = randomBytes(16).toString("hex");
   const timestamp = Date.now().toString(36);
-  const payload = `${flow}:${accountId}:${nonce}:${timestamp}`;
+  const payload = `${flow}:${accountId}:${connectionId}:${nonce}:${timestamp}`;
   const hmac = createHmac("sha256", secret).update(payload).digest("hex");
   return `${payload}:${hmac}`;
 }
@@ -120,10 +138,10 @@ export function verifyState(
   secret: string,
 ): OAuthStateData | null {
   const parts = state.split(":");
-  if (parts.length !== 5) return null;
+  if (parts.length !== 6) return null;
 
-  const [flow, accountId, nonce, timestamp, hmac] = parts;
-  if (flow !== "login" && flow !== "connect") return null;
+  const [flow, accountId, connectionId, nonce, timestamp, hmac] = parts;
+  if (flow !== "login" && flow !== "connect" && flow !== "reauthorize") return null;
 
   // Check expiry
   const stateTime = parseInt(timestamp!, 36);
@@ -131,7 +149,7 @@ export function verifyState(
     return null;
   }
 
-  const payload = `${flow}:${accountId}:${nonce}:${timestamp}`;
+  const payload = `${flow}:${accountId}:${connectionId}:${nonce}:${timestamp}`;
   const expectedHmac = createHmac("sha256", secret)
     .update(payload)
     .digest("hex");
@@ -142,5 +160,5 @@ export function verifyState(
   if (hmacBuf.length !== expectedBuf.length) return null;
   if (!timingSafeEqual(hmacBuf, expectedBuf)) return null;
 
-  return { flow: flow as OAuthFlowType, accountId: accountId! };
+  return { flow: flow as OAuthFlowType, accountId: accountId!, connectionId: connectionId! };
 }

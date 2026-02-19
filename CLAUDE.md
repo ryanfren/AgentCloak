@@ -21,7 +21,7 @@ Monorepo using pnpm workspaces with four packages:
 - `packages/server/src/routes/auth.ts` — Email/password register + login endpoints
 - `packages/server/src/routes/oauth.ts` — Google OAuth login + Gmail connection flow
 - `packages/server/src/routes/api.ts` — Dashboard API routes (session-authenticated)
-- `packages/server/src/storage/sqlite.ts` — SQLite storage implementation (schema v4)
+- `packages/server/src/storage/sqlite.ts` — SQLite storage implementation (schema v5)
 - `packages/server/src/config.ts` — Zod-validated config from env vars (Google OAuth fields are optional)
 - `packages/server/src/auth/password.ts` — scrypt password hashing
 - `packages/server/src/auth/rate-limit.ts` — In-memory sliding-window rate limiter
@@ -40,7 +40,7 @@ pnpm -C packages/web exec vite build  # Build web dashboard only
 
 ## Database
 
-SQLite at `data/agentcloak.db` (or `DATABASE_PATH` env var). Schema version 4. Migrations run automatically on startup in `sqlite.ts`. Key tables: accounts, sessions, email_connections, api_keys, filter_configs.
+SQLite at `data/agentcloak.db` (or `DATABASE_PATH` env var). Schema version 5. Migrations run automatically on startup in `sqlite.ts`. Key tables: accounts, sessions, email_connections, api_keys, filter_configs. Note: email_connections has no UNIQUE constraint on (email, provider) — multiple connections to the same email are allowed.
 
 ## Authentication
 

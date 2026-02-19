@@ -7,6 +7,7 @@ import { keysCommand } from "./commands/keys.js";
 import { filtersCommand } from "./commands/filters.js";
 import { statusCommand } from "./commands/status.js";
 import { resetPasswordCommand } from "./commands/reset-password.js";
+import { accountsCommand } from "./commands/accounts.js";
 
 const program = new Command();
 
@@ -21,5 +22,6 @@ program.addCommand(keysCommand);
 program.addCommand(filtersCommand);
 program.addCommand(statusCommand);
 program.addCommand(resetPasswordCommand);
+program.addCommand(accountsCommand);
 
 program.parse();

@@ -28,6 +28,8 @@ COPY --from=deps /app/packages/server/node_modules packages/server/node_modules
 COPY --from=build /app/packages/server/dist packages/server/dist
 COPY --from=build /app/packages/server/package.json packages/server/
 COPY --from=build /app/packages/web/dist packages/web/dist
+COPY --from=build /app/packages/cli/dist packages/cli/dist
+COPY --from=build /app/packages/cli/package.json packages/cli/
 
 ENV NODE_ENV=production
 ENV DATABASE_PATH=/app/data/agentcloak.db

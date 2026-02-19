@@ -551,4 +551,4 @@ The generated script contains a secret that authenticates requests between Agent
 
 ## License
 
-MIT
+[Business Source License 1.1](LICENSE) — You can self-host for internal use, personal projects, and non-commercial purposes. The only restriction is offering it as a competing hosted service. On February 18, 2030, the code converts to Apache 2.0.

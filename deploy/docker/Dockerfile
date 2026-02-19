@@ -13,6 +13,8 @@ RUN pnpm install --frozen-lockfile
 
 # Build
 FROM deps AS build
+ARG VITE_FORMSPREE_URL
+ENV VITE_FORMSPREE_URL=$VITE_FORMSPREE_URL
 COPY tsconfig.base.json ./
 COPY packages/ packages/
 RUN pnpm build

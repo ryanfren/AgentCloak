@@ -13,6 +13,7 @@ import {
   KeyRound,
   FolderLock,
   ChevronDown,
+  Send,
 } from "lucide-react";
 import { useAuth } from "../auth/AuthContext";
 
@@ -120,6 +121,7 @@ const features = [
 ];
 
 const GITHUB_URL = "https://github.com/ryanfren/AgentCloak";
+const FORMSPREE_URL = import.meta.env.VITE_FORMSPREE_URL as string | undefined;
 
 const faqs: { question: string; answer: React.ReactNode }[] = [
   {
@@ -175,6 +177,26 @@ const faqs: { question: string; answer: React.ReactNode }[] = [
     question: "How do API keys work?",
     answer:
       "Each connection can have multiple API keys with independent filter configurations. Keys are hashed server-side and never stored in plain text.",
+  },
+  {
+    question: "What license is AgentCloak under?",
+    answer: (
+      <>
+        AgentCloak is licensed under the{" "}
+        <a
+          href={`${GITHUB_URL}/blob/main/LICENSE`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-emerald-400 hover:underline"
+        >
+          Business Source License 1.1 (BSL)
+        </a>
+        . You can freely self-host it for internal use, personal projects, and
+        non-commercial purposes. The only restriction is offering it as a
+        competing hosted service. On February 18, 2030, the code automatically
+        converts to Apache 2.0, a fully permissive open-source license.
+      </>
+    ),
   },
 ];
 
@@ -333,6 +355,14 @@ export function LandingPage() {
             <span className="text-lg font-semibold">AgentCloak</span>
           </div>
           <div className="flex items-center gap-3">
+            {FORMSPREE_URL && (
+              <a
+                href="#contact"
+                className="text-sm text-zinc-400 transition-colors hover:text-zinc-200"
+              >
+                Contact
+              </a>
+            )}
             {!loading && (
               <>
                 {account ? (
@@ -490,6 +520,59 @@ export function LandingPage() {
           </div>
         </div>
       </section>
+
+      {/* Contact */}
+      {FORMSPREE_URL && (
+        <section id="contact" className="border-t border-zinc-800/50 px-6 py-20">
+          <div className="mx-auto max-w-lg">
+            <h2 className="mb-3 text-center text-2xl font-bold">
+              Get in Touch
+            </h2>
+            <p className="mb-8 text-center text-sm text-zinc-500">
+              Questions, feedback, or partnership inquiries — we'd love to hear from you.
+            </p>
+            <form
+              action={FORMSPREE_URL}
+              method="POST"
+              className="space-y-4"
+            >
+              <div>
+                <label htmlFor="contact-email" className="mb-1 block text-sm font-medium text-zinc-300">
+                  Your email
+                </label>
+                <input
+                  id="contact-email"
+                  type="email"
+                  name="email"
+                  required
+                  placeholder="you@example.com"
+                  className="w-full rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label htmlFor="contact-message" className="mb-1 block text-sm font-medium text-zinc-300">
+                  Your message
+                </label>
+                <textarea
+                  id="contact-message"
+                  name="message"
+                  required
+                  rows={4}
+                  placeholder="What's on your mind?"
+                  className="w-full resize-none rounded-md border border-zinc-700 bg-zinc-800 px-3 py-2 text-sm text-zinc-100 placeholder-zinc-500 focus:border-emerald-500 focus:outline-none"
+                />
+              </div>
+              <button
+                type="submit"
+                className="inline-flex items-center gap-2 rounded-md bg-emerald-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-500"
+              >
+                <Send className="h-4 w-4" />
+                Send Message
+              </button>
+            </form>
+          </div>
+        </section>
+      )}
 
       {/* Footer */}
       <footer className="border-t border-zinc-800/50 px-6 py-8">

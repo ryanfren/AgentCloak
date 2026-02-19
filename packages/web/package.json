@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "AgentCloak web dashboard — React + Tailwind + Vite SPA for managing connections, API keys, and filters",
+  "license": "BSL-1.1",
+  "author": "Ryan French",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",

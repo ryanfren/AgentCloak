@@ -48,44 +48,9 @@ SQLite at `data/agentcloak.db` (or `DATABASE_PATH` env var). Schema version 5. M
 - **MCP endpoint:** API keys (prefixed `ac_`, hashed with SHA-256, stored in api_keys table)
 - **Google OAuth:** Optional — config fields are `.optional()` in Zod schema. `isGoogleOAuthConfigured()` guards all OAuth routes.
 
-## Production Deployment (Railway)
+## Production Deployment
 
-The production instance is deployed on Railway:
-
-- **URL:** https://agentcloak.up.railway.app
-- **Railway project:** motivated-fulfillment
-- **Service:** agentcloak
-- **Persistent volume:** Mounted at `/app/data` (holds SQLite database)
-- **Docker:** Uses `deploy/docker/Dockerfile` (multi-stage build: deps, build, production)
-
-### Deploying changes
-
-```bash
-# From the agentcloak directory (must have Railway CLI linked)
-railway up --detach
-```
-
-This builds the Docker image on Railway and deploys it. Builds typically take 2-3 minutes. The `--detach` flag returns immediately; check build logs at the URL printed.
-
-### Environment variables on Railway
-
-Set via `railway variables set KEY=VALUE` or the Railway dashboard:
-
-- `SESSION_SECRET` — Random 32+ char string
-- `BASE_URL` — `https://agentcloak.up.railway.app`
-- `PORT` — `3000`
-- `DATABASE_PATH` — `/app/data/agentcloak.db`
-- `GOOGLE_CLIENT_ID` — Google OAuth client ID (optional)
-- `GOOGLE_CLIENT_SECRET` — Google OAuth client secret (optional)
-- `GOOGLE_REDIRECT_URI` — `https://agentcloak.up.railway.app/auth/callback` (optional)
-
-### Checking Railway status
-
-```bash
-railway logs --tail 20        # Recent server logs
-railway logs --build --tail 20 # Recent build logs
-railway status                 # Project/service info
-```
+See `.claude-private.md` (not tracked in git) for production deployment details.
 
 ### Important: Accept header compatibility
 

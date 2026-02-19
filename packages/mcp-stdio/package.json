@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "AgentCloak stdio-to-HTTP proxy for MCP clients that only support stdio transport",
+  "license": "BSL-1.1",
+  "author": "Ryan French",
   "bin": {
     "agentcloak-mcp": "dist/index.js"
   },

@@ -1,6 +1,6 @@
 # AgentCloak
 
-An open-source proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens, IMAP credentials, and Apps Script secrets server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
+A source-available proxy service that sits between AI agents and your email. AgentCloak holds OAuth tokens, IMAP credentials, and Apps Script secrets server-side, filters sensitive content, redacts PII and email addresses, and sanitizes for prompt injection — so agents can safely triage, summarize, and draft emails without seeing things they shouldn't.
 
 ## Key Safety Features
 
@@ -84,7 +84,7 @@ agentcloak/
 ### 1. Install
 
 ```bash
-git clone https://github.com/yourusername/agentcloak.git
+git clone https://github.com/ryanfren/AgentCloak.git
 cd agentcloak
 pnpm install
 ```

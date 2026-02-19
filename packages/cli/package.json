@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "description": "AgentCloak CLI — setup wizard, key management, filter configuration, password reset",
+  "license": "BSL-1.1",
+  "author": "Ryan French",
   "bin": {
     "agentcloak": "dist/index.js"
   },

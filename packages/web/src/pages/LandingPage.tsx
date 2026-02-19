@@ -127,7 +127,7 @@ const faqs: { question: string; answer: React.ReactNode }[] = [
   {
     question: "What is AgentCloak?",
     answer:
-      "AgentCloak is an open-source MCP (Model Context Protocol) proxy for email. It sits between AI agents and your inbox, holding credentials server-side while filtering sensitive content before it reaches the agent.",
+      "AgentCloak is a source-available MCP (Model Context Protocol) proxy for email. It sits between AI agents and your inbox, holding credentials server-side while filtering sensitive content before it reaches the agent.",
   },
   {
     question: "Which email providers are supported?",
@@ -142,7 +142,7 @@ const faqs: { question: string; answer: React.ReactNode }[] = [
     question: "Can I self-host it?",
     answer: (
       <>
-        Yes, AgentCloak is fully open-source. Clone the repo, set up your
+        Yes, AgentCloak's source code is publicly available. Clone the repo, set up your
         environment variables, and run with Docker or Node. See the{" "}
         <a
           href={GITHUB_URL}
@@ -194,7 +194,7 @@ const faqs: { question: string; answer: React.ReactNode }[] = [
         . You can freely self-host it for internal use, personal projects, and
         non-commercial purposes. The only restriction is offering it as a
         competing hosted service. On February 18, 2030, the code automatically
-        converts to Apache 2.0, a fully permissive open-source license.
+        converts to Apache 2.0, a fully permissive license.
       </>
     ),
   },
@@ -409,7 +409,7 @@ export function LandingPage() {
             </span>
           </h1>
           <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-zinc-400">
-            An open-source MCP proxy that holds credentials server-side, filters
+            A source-available MCP proxy that holds credentials server-side, filters
             sensitive content, redacts PII, and detects prompt injection — so
             your AI agents can read email without accessing anything they
             shouldn't.
@@ -581,10 +581,18 @@ export function LandingPage() {
             <Shield className="h-4 w-4 text-emerald-400" />
             <span>AgentCloak</span>
             <span className="hidden sm:inline">
-              — Open source email security for AI agents
+              — Email security for AI agents
             </span>
           </div>
-          <span>&copy; {new Date().getFullYear()} AgentCloak</span>
+          <div className="flex items-center gap-4">
+            <Link to="/privacy" className="hover:text-zinc-300 transition-colors">
+              Privacy
+            </Link>
+            <Link to="/terms" className="hover:text-zinc-300 transition-colors">
+              Terms
+            </Link>
+            <span>&copy; {new Date().getFullYear()} AgentCloak</span>
+          </div>
         </div>
       </footer>
     </div>

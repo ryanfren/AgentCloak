@@ -13,3 +13,5 @@ data/
 .DS_Store
 *.log
 coverage/
+.claude-private.md
+MULTI_ACCOUNT_PLAN.md

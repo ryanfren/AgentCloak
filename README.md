@@ -73,6 +73,8 @@ agentcloak/
 │   ├── web/             # Web dashboard (React + Tailwind + Vite)
 │   ├── cli/             # CLI for setup, key management, filters, password reset
 │   └── mcp-stdio/       # Stdio proxy for stdio-only environments
+├── scripts/             # Setup and utility scripts
+│   └── setup-gcp-project.sh  # Automated GCP project setup
 └── deploy/
     ├── docker/          # Docker deployment
     └── cloudflare/      # Cloudflare Workers (planned)
@@ -102,6 +104,30 @@ Google OAuth is **optional**. You only need it if you want:
 - Gmail OAuth as an email connection method (IMAP and Apps Script work without it)
 
 If you don't need either, skip to [step 3](#3-configure-environment).
+
+**Automated setup (recommended):**
+
+The `scripts/setup-gcp-project.sh` script walks you through project creation, API enablement, consent screen configuration, and credential generation. It prompts for each value with sensible defaults — press Enter to accept:
+
+```bash
+./scripts/setup-gcp-project.sh
+```
+
+```
+  GCP Account: you@gmail.com
+
+Press Enter to accept the default shown in [brackets].
+
+  Project name [AgentCloak]:
+  Project ID [agentcloak-a1b2c3d4]:
+  OAuth redirect URI [http://localhost:3000/auth/callback]:
+  Consent screen support email [you@gmail.com]:
+```
+
+Requires the [gcloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud auth login` first). The script generates a `.env` file with `SESSION_SECRET` and `DATABASE_ENCRYPTION_KEY` auto-generated via `openssl rand`, and fills in the Google OAuth credentials. If an existing `.env` is found, it asks before overwriting. If any GCP API call fails (Google's consent screen API can be finicky on new projects), it prints direct console links and manual instructions for the remaining steps.
+
+<details>
+<summary><strong>Manual setup</strong> (click to expand)</summary>
 
 **Create a project and enable the Gmail API:**
 
@@ -147,6 +173,8 @@ If you don't need either, skip to [step 3](#3-configure-environment).
     ```
     > If you changed the port in your `.env`, use that port instead.
 15. Click **Create**. Copy the **Client ID** and **Client Secret** — you'll need them in the next step.
+
+</details>
 
 ### 3. Configure environment
 

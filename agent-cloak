@@ -1,0 +1,840 @@
+#!/usr/bin/env python3
+"""Agent-Cloak — Scan files for sensitive data, report findings, interactively redact.
+
+Supports PDF and plain text files, single files or directories.
+
+Usage:
+    agent-cloak <file>              Scan, report, select, redact
+    agent-cloak <directory>         Scan all supported files in directory
+    agent-cloak --manual <file>     Manual string entry mode (no auto-scan)
+
+Requires: pymupdf (pip install pymupdf) for PDF support.
+"""
+
+import re
+import sys
+import os
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Optional
+
+
+# ─── Finding data class ─────────────────────────────────────────────
+
+@dataclass
+class Finding:
+    category: str       # PII, Financial, Identifiers
+    label: str          # SSN, Email, Credit Card, etc.
+    matched_text: str   # the raw matched string
+    masked_text: str    # display-safe masked version
+    confidence: str     # HIGH or MEDIUM
+    file_path: str
+    location: str       # "p.1" for PDF page, "L.42" for text line
+    context: str        # surrounding text snippet
+    selected: bool = True  # pre-selected for redaction?
+    page_num: int = -1  # PDF page index (0-based), -1 for text
+
+
+# ─── Luhn check for credit card validation ──────────────────────────
+
+def luhn_check(number: str) -> bool:
+    """Validate a number string with the Luhn algorithm."""
+    digits = [int(d) for d in number if d.isdigit()]
+    if len(digits) < 13:
+        return False
+    checksum = 0
+    reverse = digits[::-1]
+    for i, d in enumerate(reverse):
+        if i % 2 == 1:
+            d *= 2
+            if d > 9:
+                d -= 9
+        checksum += d
+    return checksum % 10 == 0
+
+
+# ─── Pattern definitions ────────────────────────────────────────────
+# Each pattern: (label, regex, confidence, validator_fn_or_None, mask_fn)
+
+def mask_ssn(m: str) -> str:
+    return "***-**-" + m[-4:]
+
+def mask_email(m: str) -> str:
+    parts = m.split("@")
+    return "****@" + parts[1] if len(parts) == 2 else "****"
+
+def mask_phone(m: str) -> str:
+    digits = re.sub(r"\D", "", m)
+    return "(***) ***-" + digits[-4:]
+
+def mask_cc(m: str) -> str:
+    digits = re.sub(r"\D", "", m)
+    return "****-****-****-" + digits[-4:]
+
+def mask_partial(m: str) -> str:
+    if len(m) <= 4:
+        return "*" * len(m)
+    return "*" * (len(m) - 4) + m[-4:]
+
+def mask_full(m: str) -> str:
+    return "*" * len(m)
+
+def mask_token(m: str) -> str:
+    if len(m) <= 8:
+        return "*" * len(m)
+    return m[:4] + "*" * (len(m) - 8) + m[-4:]
+
+def mask_jwt(m: str) -> str:
+    parts = m.split(".")
+    if len(parts) == 3:
+        return parts[0][:10] + "...<redacted>"
+    return m[:10] + "...<redacted>"
+
+
+PATTERNS = {
+    "PII": [
+        (
+            "SSN",
+            r"\b\d{3}-\d{2}-\d{4}\b",
+            "HIGH",
+            # Real SSNs don't start with 000, 666, or 9xx (9xx = ITIN, handled below)
+            lambda m: not re.match(r"^(000|666|9\d\d)", m),
+            mask_ssn,
+        ),
+        (
+            "ITIN",
+            # Individual Taxpayer ID: starts with 9, format 9xx-xx-xxxx
+            r"\b9\d{2}-\d{2}-\d{4}\b",
+            "HIGH",
+            None,
+            mask_ssn,
+        ),
+        (
+            "SSN (no dashes)",
+            # 9 consecutive digits near SSN/social keywords
+            r"(?i)(?:ssn|social\s*security|social)\s*(?:#|no\.?|number)?\s*:?\s*(\d{9})\b",
+            "HIGH",
+            lambda m: not re.match(r"^(000|666)", m),
+            lambda m: mask_ssn(m[:3] + "-" + m[3:5] + "-" + m[5:]),
+        ),
+        (
+            "SSN (last 4)",
+            # Partial SSNs: xx-1234, XX-1234, ***-**-1234, xxx-xx-1234, etc.
+            r"(?i)(?:[x*]{2,3}[-\s]?[x*]{2}[-\s]?\d{4}|[x*]{2,3}[-\s]?\d{4}|(?:last\s*4|ssn.*last|last.*ssn)\s*:?\s*\d{4})\b",
+            "HIGH",
+            None,
+            lambda m: mask_full(m),
+        ),
+        (
+            "Email",
+            # Negative lookbehind: don't match user:pass@host inside credential URLs
+            r"(?<!:)\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b",
+            "HIGH",
+            None,
+            mask_email,
+        ),
+        (
+            "Phone (US)",
+            r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(\d{3}\)|\b\d{3})[-.\s]?\d{3}[-.\s]?\d{4}\b",
+            "HIGH",
+            # Must have at least 10 digits
+            lambda m: len(re.sub(r"\D", "", m)) >= 10,
+            mask_phone,
+        ),
+        (
+            "Date of Birth",
+            # Only dates preceded by DOB/birth keywords
+            r"(?i)(?:dob|date\s+of\s+birth|birth\s*day|birth\s*date|born)\s*:?\s*(\d{1,2}[/\-]\d{1,2}[/\-]\d{2,4})",
+            "HIGH",
+            None,
+            lambda m: mask_full(m),
+        ),
+        (
+            "Driver's License",
+            # Letter + 7-14 digits near DL keywords
+            r"(?i)(?:d\.?l\.?|driver'?s?\s*(?:license|lic)|license)\s*(?:#|no\.?|number)?\s*:?\s*([A-Z]\d{7,14})",
+            "HIGH",
+            None,
+            mask_partial,
+        ),
+        (
+            "Passport",
+            # Near passport keyword: letter + 8 digits, or 9 digits
+            r"(?i)passport\s*(?:#|no\.?|number)?\s*:?\s*([A-Z]?\d{8,9})\b",
+            "HIGH",
+            None,
+            mask_partial,
+        ),
+    ],
+    "Financial": [
+        (
+            "Credit Card",
+            r"\b(?:\d{4}[-\s]?){3}\d{4}\b",
+            "HIGH",
+            lambda m: luhn_check(m),
+            mask_cc,
+        ),
+        (
+            "Amex",
+            r"\b3[47]\d{2}[-\s]?\d{6}[-\s]?\d{5}\b",
+            "HIGH",
+            lambda m: luhn_check(m),
+            mask_cc,
+        ),
+        (
+            "CVV/CVC",
+            # 3-4 digits near security code keywords
+            r"(?i)(?:cvv|cvc|cv2|security\s*code|card\s*code)\s*:?\s*(\d{3,4})\b",
+            "HIGH",
+            None,
+            mask_full,
+        ),
+        (
+            "Card Expiry",
+            # MM/YY or MM/YYYY near expiry keywords
+            r"(?i)(?:exp(?:ir(?:y|ation|es?))?|valid\s*(?:thru|through|until))\s*:?\s*(\d{2}[/\-]\d{2,4})",
+            "HIGH",
+            None,
+            mask_full,
+        ),
+        (
+            "EIN/Tax ID",
+            # Employer Identification Number: XX-XXXXXXX near keywords
+            r"(?i)(?:ein|tax\s*(?:id|identification)|employer\s*(?:id|identification))\s*(?:#|no\.?|number)?\s*:?\s*(\d{2}-\d{7})",
+            "HIGH",
+            None,
+            mask_partial,
+        ),
+        (
+            "Routing #",
+            # 9 digits, first two digits 01-12, 21-32, 61-72, or 80
+            r"\b(?:0[1-9]|1[0-2]|2[1-9]|3[0-2]|6[1-9]|7[0-2]|80)\d{7}\b",
+            "MEDIUM",
+            None,
+            mask_partial,
+        ),
+        (
+            "Bank Account",
+            # 8-17 digits near account-related keywords
+            r"(?i)(?:account|acct|a/c)\s*(?:#|no\.?|number)?\s*:?\s*(\d{8,17})",
+            "MEDIUM",
+            None,
+            lambda m: mask_partial(m),
+        ),
+        (
+            "IBAN",
+            # International Bank Account Number: 2 letters + 2 digits + 4-30 alphanumeric
+            r"\b[A-Z]{2}\d{2}\s?[A-Z0-9]{4}(?:\s?[A-Z0-9]{4}){2,7}(?:\s?[A-Z0-9]{1,4})?\b",
+            "HIGH",
+            # Must start with valid country code (not random uppercase)
+            lambda m: re.match(r"^[A-Z]{2}\d{2}", m) is not None,
+            mask_partial,
+        ),
+    ],
+    "Identifiers": [
+        (
+            "Case/Ref #",
+            # Alphanumeric identifiers with dashes near keywords
+            r"(?i)(?:case|ref(?:erence)?|claim|policy|file|docket|ticket|id)\s*(?:#|no\.?|number)?\s*:?\s*([\dA-Z][\dA-Z\-]{3,}[\dA-Z])",
+            "HIGH",
+            lambda m: bool(re.search(r"\d", m)),  # must contain at least one digit
+            mask_partial,
+        ),
+        (
+            "Account ID",
+            # Generic long number near identifying keywords
+            r"(?i)(?:customer|member|patient|employee|client|subscriber)\s*(?:#|no\.?|number)?\s*:?\s*(\d{5,})",
+            "MEDIUM",
+            None,
+            mask_partial,
+        ),
+        (
+            "MRN",
+            # Medical Record Number near keywords
+            r"(?i)(?:mrn|medical\s*record|chart)\s*(?:#|no\.?|number)?\s*:?\s*([A-Z0-9]{5,})",
+            "HIGH",
+            lambda m: bool(re.search(r"\d", m)),
+            mask_partial,
+        ),
+        (
+            "VIN",
+            # Vehicle ID: 17 alphanumeric (no I, O, Q) near keyword or standalone
+            r"(?i)(?:vin)\s*(?:#|no\.?|number)?\s*:?\s*([A-HJ-NPR-Z0-9]{17})\b",
+            "HIGH",
+            None,
+            mask_partial,
+        ),
+    ],
+    "Secrets/Tokens": [
+        (
+            "JWT",
+            # JWT tokens: three base64url segments separated by dots
+            r"\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}",
+            "HIGH",
+            None,
+            mask_jwt,
+        ),
+        (
+            "AWS Key",
+            # AWS access key IDs start with AKIA/ASIA
+            r"\b(?:AKIA|ASIA)[A-Z0-9]{16}\b",
+            "HIGH",
+            None,
+            mask_token,
+        ),
+        (
+            "API Key",
+            # Common prefixed API keys: sk-, pk-, api_, key-, token-, etc.
+            r"\b(?:sk|pk|api|key|token|secret|access)[-_][A-Za-z0-9_-]{20,}\b",
+            "HIGH",
+            None,
+            mask_token,
+        ),
+        (
+            "Bearer Token",
+            # Bearer <token> in auth headers
+            r"(?i)Bearer\s+([A-Za-z0-9_\-.]{20,})",
+            "HIGH",
+            None,
+            mask_token,
+        ),
+        (
+            "Generic Secret",
+            # Long base64-like strings near secret keywords
+            r"(?i)(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|auth)\s*[:=]\s*[\"']?([A-Za-z0-9+/=_-]{16,})[\"']?",
+            "MEDIUM",
+            # Must have mix of upper/lower/digits (not just a plain word)
+            lambda m: bool(re.search(r"[A-Z]", m) and re.search(r"[0-9]", m)),
+            mask_token,
+        ),
+        (
+            "Private Key",
+            # PEM-encoded private key headers
+            r"-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----",
+            "HIGH",
+            None,
+            mask_full,
+        ),
+        (
+            "Credential URL",
+            # URLs with embedded user:password — postgres://, mysql://, https://, etc.
+            r"(?:https?|ftp|postgres(?:ql)?|mysql|mongodb(?:\+srv)?|redis|amqp)://[^:/?#\s]+:([^@\s]{3,})@",
+            "HIGH",
+            None,
+            mask_full,
+        ),
+        (
+            "IP Address",
+            # IPv4 near server/host/IP keywords, or standalone private IPs
+            r"(?i)(?:ip|host|server|addr(?:ess)?|connect|bind|listen)\s*[:=]?\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})",
+            "MEDIUM",
+            # Validate octets 0-255
+            lambda m: all(0 <= int(o) <= 255 for o in m.split(".")),
+            mask_full,
+        ),
+    ],
+}
+
+
+# ─── Text extraction ────────────────────────────────────────────────
+
+def extract_pages_pdf(path: str) -> list[tuple[int, str]]:
+    """Extract text from PDF, returning [(page_num, text), ...]."""
+    import fitz
+    doc = fitz.open(path)
+    pages = []
+    for i, page in enumerate(doc):
+        text = page.get_text()
+        if text.strip():
+            pages.append((i, text))
+    doc.close()
+    return pages
+
+
+def extract_pages_text(path: str) -> list[tuple[int, str]]:
+    """Extract text from plain text file, returning [(0, full_text)]."""
+    with open(path, "r", errors="replace") as f:
+        return [(0, f.read())]
+
+
+SUPPORTED_TEXT_EXTENSIONS = {".txt", ".csv", ".tsv", ".json", ".xml", ".md", ".log", ".html", ".htm", ".yaml", ".yml"}
+
+
+def is_pdf(path: str) -> bool:
+    return Path(path).suffix.lower() == ".pdf"
+
+
+def is_supported_text(path: str) -> bool:
+    return Path(path).suffix.lower() in SUPPORTED_TEXT_EXTENSIONS
+
+
+def is_supported(path: str) -> bool:
+    return is_pdf(path) or is_supported_text(path)
+
+
+# ─── Scanner ────────────────────────────────────────────────────────
+
+def get_context(text: str, start: int, end: int, width: int = 35) -> str:
+    """Get surrounding context for a match."""
+    ctx_start = max(0, start - width)
+    ctx_end = min(len(text), end + width)
+    before = text[ctx_start:start].replace("\n", " ")
+    match = text[start:end]
+    after = text[end:ctx_end].replace("\n", " ")
+
+    prefix = "..." if ctx_start > 0 else ""
+    suffix = "..." if ctx_end < len(text) else ""
+    return f'{prefix}{before}\033[1;31m{match}\033[0m{after}{suffix}'
+
+
+def get_line_number(text: str, pos: int) -> int:
+    """Get 1-based line number for a character position."""
+    return text[:pos].count("\n") + 1
+
+
+def scan_text(text: str, file_path: str, page_num: int, is_pdf_file: bool) -> list[Finding]:
+    """Scan a text block for sensitive data patterns."""
+    findings = []
+    seen_spans = set()  # (start, end) to deduplicate overlapping matches
+
+    for category, patterns in PATTERNS.items():
+        for label, regex, confidence, validator, mask_fn in patterns:
+            for m in re.finditer(regex, text):
+                # Use the last captured group if there are groups, else full match
+                if m.lastindex:
+                    matched = m.group(m.lastindex)
+                    start = m.start(m.lastindex)
+                    end = m.end(m.lastindex)
+                else:
+                    matched = m.group(0)
+                    start = m.start()
+                    end = m.end()
+
+                # Deduplicate overlapping spans
+                span = (start, end)
+                if span in seen_spans:
+                    continue
+
+                # Run validator if present
+                if validator and not validator(matched):
+                    continue
+
+                seen_spans.add(span)
+
+                if is_pdf_file:
+                    location = f"p.{page_num + 1}"
+                else:
+                    location = f"L.{get_line_number(text, start)}"
+
+                context = get_context(text, start, end)
+
+                findings.append(Finding(
+                    category=category,
+                    label=label,
+                    matched_text=matched,
+                    masked_text=mask_fn(matched),
+                    confidence=confidence,
+                    file_path=file_path,
+                    location=location,
+                    context=context,
+                    selected=(confidence == "HIGH"),
+                    page_num=page_num if is_pdf_file else -1,
+                ))
+
+    return findings
+
+
+def scan_file(path: str) -> list[Finding]:
+    """Scan a single file for sensitive data."""
+    pdf = is_pdf(path)
+    if pdf:
+        pages = extract_pages_pdf(path)
+    elif is_supported_text(path):
+        pages = extract_pages_text(path)
+    else:
+        return []
+
+    findings = []
+    for page_num, text in pages:
+        findings.extend(scan_text(text, path, page_num, pdf))
+    return findings
+
+
+# ─── Report display ─────────────────────────────────────────────────
+
+# Column widths
+COL_SEL = 5    # [x] or [ ]
+COL_NUM = 4    # item number
+COL_LBL = 14   # pattern label
+COL_MASK = 24  # masked value
+COL_LOC = 6    # location
+
+def display_report(findings: list[Finding], show_file: bool = False) -> None:
+    """Display the interactive findings report."""
+    if not findings:
+        print("\n  No sensitive data found.\n")
+        return
+
+    # Group by file then category
+    files = {}
+    for f in findings:
+        files.setdefault(f.file_path, []).append(f)
+
+    selected_count = sum(1 for f in findings if f.selected)
+    total = len(findings)
+
+    print()
+    for file_path, file_findings in files.items():
+        if show_file:
+            rel = os.path.relpath(file_path)
+            print(f"  \033[1;36m--- {rel} ---\033[0m")
+
+        # Group by category within file
+        categories = {}
+        for f in file_findings:
+            categories.setdefault(f.category, []).append(f)
+
+        for cat, cat_findings in categories.items():
+            high_count = sum(1 for f in cat_findings if f.confidence == "HIGH")
+            med_count = sum(1 for f in cat_findings if f.confidence == "MEDIUM")
+            counts = []
+            if high_count:
+                counts.append(f"{high_count} high")
+            if med_count:
+                counts.append(f"{med_count} medium")
+            print(f"\n  \033[1;33m{cat}\033[0m ({', '.join(counts)})")
+
+            for f in cat_findings:
+                idx = findings.index(f) + 1
+                sel = "\033[32m[x]\033[0m" if f.selected else "[ ]"
+                conf = "" if f.confidence == "HIGH" else f"  \033[2m[{f.confidence.lower()}]\033[0m"
+                print(f"  {sel} {idx:>3}. {f.label:<14s} {f.masked_text:<24s} {f.location:<6s} {f.context}{conf}")
+
+    print()
+    print(f"  \033[1m{'━' * 60}\033[0m")
+    selected_count = sum(1 for f in findings if f.selected)
+    print(f"  {total} findings ({selected_count} selected for redaction)")
+    print()
+
+
+def print_help():
+    print("  \033[2mCommands:\033[0m")
+    print("  \033[2m  1,3,5-8     Toggle specific items\033[0m")
+    print("  \033[2m  pii         Toggle all PII items\033[0m")
+    print("  \033[2m  financial   Toggle all Financial items\033[0m")
+    print("  \033[2m  identifiers Toggle all Identifier items\033[0m")
+    print("  \033[2m  secrets     Toggle all Secrets/Tokens items\033[0m")
+    print("  \033[2m  all         Select all\033[0m")
+    print("  \033[2m  none        Deselect all\033[0m")
+    print("  \033[2m  go          Proceed with redaction\033[0m")
+    print("  \033[2m  quit        Exit without changes\033[0m")
+    print()
+
+
+def parse_item_spec(spec: str, total: int) -> list[int]:
+    """Parse '1,3,5-8' into list of 1-based indices."""
+    indices = []
+    for part in spec.split(","):
+        part = part.strip()
+        if "-" in part:
+            try:
+                a, b = part.split("-", 1)
+                a, b = int(a), int(b)
+                indices.extend(range(a, b + 1))
+            except ValueError:
+                pass
+        else:
+            try:
+                indices.append(int(part))
+            except ValueError:
+                pass
+    return [i for i in indices if 1 <= i <= total]
+
+
+def toggle_findings(findings: list[Finding], command: str) -> bool:
+    """Process a toggle command. Returns True if should redact, False to keep prompting, None to quit."""
+    cmd = command.strip().lower()
+
+    if cmd in ("go", "done", "redact", "y", "yes"):
+        return True
+    if cmd in ("quit", "q", "exit", "n", "no"):
+        return None
+    if cmd == "help":
+        print_help()
+        return False
+    if cmd == "all":
+        for f in findings:
+            f.selected = True
+        return False
+    if cmd == "none":
+        for f in findings:
+            f.selected = False
+        return False
+
+    # Category toggle
+    cat_map = {
+        "pii": "PII",
+        "financial": "Financial",
+        "fin": "Financial",
+        "identifiers": "Identifiers",
+        "id": "Identifiers",
+        "ids": "Identifiers",
+        "secrets": "Secrets/Tokens",
+        "tokens": "Secrets/Tokens",
+        "keys": "Secrets/Tokens",
+    }
+    if cmd in cat_map:
+        cat = cat_map[cmd]
+        cat_findings = [f for f in findings if f.category == cat]
+        # If all selected, deselect all. Otherwise select all.
+        all_on = all(f.selected for f in cat_findings)
+        for f in cat_findings:
+            f.selected = not all_on
+        return False
+
+    # Number spec: 1,3,5-8
+    indices = parse_item_spec(cmd, len(findings))
+    if indices:
+        for i in indices:
+            findings[i - 1].selected = not findings[i - 1].selected
+        return False
+
+    print(f"  Unknown command: '{cmd}' (type 'help' for options)")
+    return False
+
+
+# ─── Redaction engine ───────────────────────────────────────────────
+
+def redact_pdf_file(input_path: str, output_path: str, findings: list[Finding]) -> int:
+    """Redact selected findings from a PDF file. Returns count redacted."""
+    import fitz
+    doc = fitz.open(input_path)
+    count = 0
+
+    # Group findings by page
+    by_page = {}
+    for f in findings:
+        if f.selected and f.file_path == input_path:
+            by_page.setdefault(f.page_num, []).append(f)
+
+    for page_idx, page_findings in by_page.items():
+        page = doc[page_idx]
+        for f in page_findings:
+            instances = page.search_for(f.matched_text)
+            for rect in instances:
+                page.add_redact_annot(
+                    rect,
+                    text="",
+                    fill=(1, 1, 1),
+                )
+            count += len(instances)
+        page.apply_redactions()
+
+    doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
+    return count
+
+
+def redact_text_file(input_path: str, output_path: str, findings: list[Finding]) -> int:
+    """Redact selected findings from a text file. Returns count redacted."""
+    with open(input_path, "r", errors="replace") as f:
+        content = f.read()
+
+    count = 0
+    for finding in findings:
+        if finding.selected and finding.file_path == input_path:
+            # Replace with same-length mask
+            replacement = "*" * len(finding.matched_text)
+            new_content = content.replace(finding.matched_text, replacement)
+            if new_content != content:
+                count += content.count(finding.matched_text)
+                content = new_content
+
+    with open(output_path, "w") as f:
+        f.write(content)
+
+    return count
+
+
+def make_output_path(input_path: str) -> str:
+    """Generate output path: file.pdf -> file-redacted.pdf."""
+    p = Path(input_path)
+    return str(p.parent / f"{p.stem}-redacted{p.suffix}")
+
+
+# ─── Manual mode (legacy pdf-redact behavior) ──────────────────────
+
+def manual_mode(input_path: str, output_path: str):
+    """Interactive manual string replacement (original pdf-redact behavior)."""
+    import fitz
+
+    pairs = []
+    print()
+    print("=== Manual String Redactor ===")
+    print("Enter strings to find/replace. Leave replacement blank to white-out.")
+    print("Type 'done' when finished.")
+    print()
+
+    while True:
+        try:
+            find_str = input("Find string (or 'done'): ")
+        except (EOFError, KeyboardInterrupt):
+            break
+
+        if find_str.lower() == "done":
+            break
+        if not find_str:
+            print("  (empty — skipped)")
+            continue
+
+        try:
+            replace_str = input("Replace with [blank = white-out]: ")
+        except (EOFError, KeyboardInterrupt):
+            replace_str = ""
+
+        pairs.append((find_str, replace_str))
+        label = replace_str if replace_str else "<blank>"
+        print(f"  + '{find_str}' -> '{label}'")
+        print()
+
+    if not pairs:
+        print("Nothing to replace.")
+        return
+
+    print("\nProcessing...")
+    doc = fitz.open(input_path)
+
+    for find_str, repl_str in pairs:
+        total = 0
+        for page in doc:
+            instances = page.search_for(find_str)
+            total += len(instances)
+            for rect in instances:
+                page.add_redact_annot(rect, text=repl_str or "", fontsize=0, fill=(1, 1, 1))
+            if instances:
+                page.apply_redactions()
+        print(f"  Replaced {total}x: '{find_str}'")
+
+    doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
+    print(f"\nDone -> {output_path}")
+
+
+# ─── Main ───────────────────────────────────────────────────────────
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Scan files for sensitive data and interactively redact.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="Examples:\n"
+               "  agent-cloak invoice.pdf\n"
+               "  agent-cloak contracts/\n"
+               "  agent-cloak --manual form.pdf\n"
+               "  agent-cloak --manual form.pdf -o form-clean.pdf\n",
+    )
+    parser.add_argument("path", help="File or directory to scan")
+    parser.add_argument("-o", "--output", help="Output path (default: <name>-redacted.<ext>)")
+    parser.add_argument("--manual", action="store_true", help="Manual string entry mode (no auto-scan)")
+    args = parser.parse_args()
+
+    target = Path(args.path)
+
+    if not target.exists():
+        print(f"Error: not found: {args.path}", file=sys.stderr)
+        sys.exit(1)
+
+    # Manual mode
+    if args.manual:
+        if target.is_dir():
+            print("Error: --manual mode only works with single files", file=sys.stderr)
+            sys.exit(1)
+        output = args.output or make_output_path(str(target))
+        manual_mode(str(target), output)
+        return
+
+    # Collect files to scan
+    if target.is_dir():
+        files = sorted(
+            str(p) for p in target.rglob("*")
+            if p.is_file() and is_supported(str(p))
+        )
+        if not files:
+            print(f"No supported files found in {args.path}")
+            sys.exit(0)
+        print(f"\nScanning {len(files)} file(s) in {args.path}...")
+    else:
+        if not is_supported(str(target)):
+            print(f"Error: unsupported file type: {target.suffix}", file=sys.stderr)
+            print(f"Supported: PDF, {', '.join(sorted(SUPPORTED_TEXT_EXTENSIONS))}", file=sys.stderr)
+            sys.exit(1)
+        files = [str(target)]
+        print(f"\nScanning {target.name}...")
+
+    # Scan all files
+    all_findings = []
+    for fpath in files:
+        try:
+            findings = scan_file(fpath)
+            all_findings.extend(findings)
+        except Exception as e:
+            print(f"  Warning: failed to scan {fpath}: {e}", file=sys.stderr)
+
+    if not all_findings:
+        print("\n  No sensitive data found. File appears clean.")
+        sys.exit(0)
+
+    show_file = len(files) > 1
+
+    # Display report and interactive selection loop
+    display_report(all_findings, show_file=show_file)
+    print_help()
+
+    while True:
+        try:
+            cmd = input("  > ")
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Cancelled.")
+            sys.exit(0)
+
+        result = toggle_findings(all_findings, cmd)
+        if result is True:
+            break
+        if result is None:
+            print("  Exiting without changes.")
+            sys.exit(0)
+        # Redisplay
+        display_report(all_findings, show_file=show_file)
+
+    # Apply redactions
+    selected = [f for f in all_findings if f.selected]
+    if not selected:
+        print("  No items selected. Nothing to redact.")
+        sys.exit(0)
+
+    # Group by file
+    by_file = {}
+    for f in selected:
+        by_file.setdefault(f.file_path, []).append(f)
+
+    print()
+    for fpath, file_findings in by_file.items():
+        output = args.output if (args.output and len(by_file) == 1) else make_output_path(fpath)
+
+        try:
+            if is_pdf(fpath):
+                count = redact_pdf_file(fpath, output, all_findings)
+            else:
+                count = redact_text_file(fpath, output, all_findings)
+
+            rel_in = os.path.relpath(fpath)
+            rel_out = os.path.relpath(output)
+            print(f"  {rel_in} -> {rel_out} ({count} redaction(s))")
+        except Exception as e:
+            print(f"  Error redacting {fpath}: {e}", file=sys.stderr)
+
+    print("\n  Done.")
+
+
+if __name__ == "__main__":
+    main()

@@ -29,8 +29,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
-      expect(result.message.body).toContain("[AGENTCLOAK WARNING:");
+      expect(result.action).toBe("block");
     });
 
     it("detects 'you are now a'", () => {
@@ -40,7 +39,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
 
     it("detects '[SYSTEM]' tag", () => {
@@ -50,7 +49,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
 
     it("detects '<|system|>' delimiter", () => {
@@ -60,7 +59,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
 
     it("detects 'disregard all prior'", () => {
@@ -70,7 +69,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
 
     it("detects 'override safety filter'", () => {
@@ -80,7 +79,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
 
     it("detects 'pretend you are'", () => {
@@ -90,7 +89,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
+      expect(result.action).toBe("block");
     });
   });
 
@@ -118,8 +117,7 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
-      expect(result.message.body).toContain("[AGENTCLOAK WARNING:");
+      expect(result.action).toBe("block");
     });
   });
 
@@ -132,20 +130,19 @@ describe("InjectionFilter", () => {
       const result = filter.filter(msg);
 
       expect(result.action).toBe("pass");
-      expect(result.message.body).not.toContain("[AGENTCLOAK WARNING:");
     });
   });
 
-  describe("Warning message content", () => {
-    it("includes pattern labels in warning message", () => {
+  describe("Block reason content", () => {
+    it("includes pattern labels in block reason", () => {
       const filter = new InjectionFilter();
       const msg = makeMessage({
         body: "ignore all previous instructions",
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
-      expect(result.message.body).toContain("instruction override");
+      expect(result.action).toBe("block");
+      expect(result.reason).toContain("instruction override");
     });
 
     it("lists all detected patterns when multiple are found", () => {
@@ -155,10 +152,10 @@ describe("InjectionFilter", () => {
       });
       const result = filter.filter(msg);
 
-      expect(result.action).toBe("redact");
-      expect(result.message.body).toContain("instruction override");
-      expect(result.message.body).toContain("role reassignment");
-      expect(result.message.body).toContain("safety bypass");
+      expect(result.action).toBe("block");
+      expect(result.reason).toContain("instruction override");
+      expect(result.reason).toContain("role reassignment");
+      expect(result.reason).toContain("safety bypass");
     });
   });
 });

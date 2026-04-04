@@ -32,8 +32,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  const logout = () => {
-    window.location.href = "/auth/logout";
+  const logout = async () => {
+    try {
+      await fetch("/auth/logout", { method: "POST", credentials: "include" });
+    } catch {
+      // Ignore errors — redirect regardless
+    }
+    window.location.href = "/login";
   };
 
   return (

@@ -233,4 +233,108 @@ describe("PiiFilter", () => {
       expect(result.message.body).not.toContain("AKIAIOSFODNN7EXAMPLE");
     });
   });
+
+  describe("Phone number redaction", () => {
+    it("redacts (xxx) xxx-xxxx format", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({ body: "Call me at (555) 123-4567" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[PHONE_REDACTED]");
+      expect(result.message.body).not.toContain("(555) 123-4567");
+    });
+
+    it("redacts xxx-xxx-xxxx format", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({ body: "Phone: 555-123-4567" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[PHONE_REDACTED]");
+      expect(result.message.body).not.toContain("555-123-4567");
+    });
+
+    it("redacts +1 xxx xxx xxxx format", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({ body: "Intl: +1 555 123 4567" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[PHONE_REDACTED]");
+      expect(result.message.body).not.toContain("+1 555 123 4567");
+    });
+  });
+
+  describe("Mastercard 2-series redaction", () => {
+    it("redacts Mastercard 2-series numbers (2221-2720 range)", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({ body: "Card: 2221 0000 0000 0000" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[CREDIT_CARD_REDACTED]");
+      expect(result.message.body).not.toContain("2221 0000 0000 0000");
+    });
+  });
+
+  describe("SSN format variations", () => {
+    it("redacts space-separated SSN: 123 45 6789", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({ body: "SSN: 123 45 6789" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[SSN_REDACTED]");
+      expect(result.message.body).not.toContain("123 45 6789");
+    });
+  });
+
+  describe("Dollar amount variations", () => {
+    it("redacts dollar amount under $1,000: $999.99", () => {
+      const filter = new PiiFilter(true, true, true);
+      const msg = makeMessage({ body: "Total: $999.99" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[AMOUNT_REDACTED]");
+      expect(result.message.body).not.toContain("$999.99");
+    });
+
+    it("redacts dollar amount without cents: $1,234", () => {
+      const filter = new PiiFilter(true, true, true);
+      const msg = makeMessage({ body: "Balance: $1,234" });
+      const result = filter.filter(msg);
+
+      expect(result.action).toBe("redact");
+      expect(result.message.body).toContain("[AMOUNT_REDACTED]");
+      expect(result.message.body).not.toContain("$1,234");
+    });
+  });
+
+  describe("Address name field redaction", () => {
+    it("redacts PII in from.name field", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({
+        from: { name: "SSN 123-45-6789", email: "sender@example.com" },
+      });
+      const result = filter.filter(msg);
+
+      expect(result.message.from.name).toContain("[SSN_REDACTED]");
+      expect(result.message.from.name).not.toContain("123-45-6789");
+    });
+
+    it("redacts PII in to[].name field", () => {
+      const filter = new PiiFilter();
+      const msg = makeMessage({
+        to: [
+          { name: "Card 4111 1111 1111 1111", email: "recipient@example.com" },
+        ],
+      });
+      const result = filter.filter(msg);
+
+      expect(result.message.to[0].name).toContain("[CREDIT_CARD_REDACTED]");
+      expect(result.message.to[0].name).not.toContain("4111 1111 1111 1111");
+    });
+  });
 });

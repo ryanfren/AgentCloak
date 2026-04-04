@@ -1,0 +1,12 @@
+.env
+.env.*
+*.bak
+data/
+.git/
+.github/
+*.db
+*.db-shm
+*.db-wal
+node_modules/
+coverage/
+.claude-private.md

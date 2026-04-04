@@ -8,6 +8,7 @@ import type { EmailFilter, FilterResult } from "./types.js";
 
 export class FilterPipeline {
   private filters: EmailFilter[];
+  private piiFilter: PiiFilter;
   public readonly showFilteredCount: boolean;
   public readonly emailRedactionEnabled: boolean;
   public readonly blockedDomains: string[];
@@ -21,16 +22,30 @@ export class FilterPipeline {
     this.allowedFolders = userConfig?.allowedFolders ?? [];
     const blocklist = new BlocklistFilter(userConfig);
     this.blockedDomains = blocklist.getBlockedDomains();
+    // PII and injection filters are always-on by design (security floor)
+    this.piiFilter = new PiiFilter(
+      userConfig?.piiRedactionEnabled ?? true,
+      userConfig?.emailRedactionEnabled ?? true,
+      userConfig?.dollarAmountRedactionEnabled ?? true,
+    );
     this.filters = [
       blocklist,
       new SanitizerFilter(),
-      new PiiFilter(
-        userConfig?.piiRedactionEnabled ?? true,
-        userConfig?.emailRedactionEnabled ?? true,
-        userConfig?.dollarAmountRedactionEnabled ?? true,
-      ),
+      this.piiFilter,
       new InjectionFilter(userConfig?.injectionDetectionEnabled ?? true),
     ];
+  }
+
+  /** Apply PII redaction patterns to arbitrary text (for snippets, subjects, etc.) */
+  redactText(text: string): string {
+    // Run the PII filter on a minimal message and extract the redacted body
+    const dummy: EmailMessage = {
+      id: "", threadId: "", subject: "", from: { name: "", email: "" },
+      to: [], cc: [], date: "", snippet: "", body: text, labels: [],
+      attachments: [], isUnread: false,
+    };
+    const result = this.piiFilter.filter(dummy);
+    return result.message.body;
   }
 
   addFilter(filter: EmailFilter): void {

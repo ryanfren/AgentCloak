@@ -19,7 +19,7 @@ export function registerAllTools(
   registerReadEmail(server, provider, pipeline);
   registerListThreads(server, provider, pipeline);
   registerGetThread(server, provider, pipeline);
-  registerCreateDraft(server, provider);
+  registerCreateDraft(server, provider, pipeline);
   registerListDrafts(server, provider, pipeline);
   registerListLabels(server, provider, pipeline);
   registerProviderInfo(server, provider);

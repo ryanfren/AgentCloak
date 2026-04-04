@@ -45,9 +45,9 @@ export class SanitizerFilter implements EmailFilter {
     delete sanitized.htmlBody;
 
     // Strip dangerous Unicode
-    sanitized.body = stripUnicode(sanitized.body);
-    sanitized.subject = stripUnicode(sanitized.subject);
-    sanitized.snippet = stripUnicode(sanitized.snippet);
+    sanitized.body = stripUnicode(sanitized.body).normalize("NFKC");
+    sanitized.subject = stripUnicode(sanitized.subject).normalize("NFKC");
+    sanitized.snippet = stripUnicode(sanitized.snippet).normalize("NFKC");
 
     return { action: "pass", message: sanitized };
   }

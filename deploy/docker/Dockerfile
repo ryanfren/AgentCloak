@@ -23,6 +23,7 @@ RUN pnpm build
 
 # Production
 FROM base AS production
+RUN groupadd -r agentcloak && useradd -r -g agentcloak -d /app agentcloak
 COPY --from=deps /app/node_modules node_modules
 COPY --from=deps /app/packages/server/node_modules packages/server/node_modules
 COPY --from=build /app/packages/server/dist packages/server/dist
@@ -31,10 +32,15 @@ COPY --from=build /app/packages/web/dist packages/web/dist
 COPY --from=build /app/packages/cli/dist packages/cli/dist
 COPY --from=build /app/packages/cli/package.json packages/cli/
 COPY --from=deps /app/packages/cli/node_modules packages/cli/node_modules
+RUN chown -R agentcloak:agentcloak /app
 
 ENV NODE_ENV=production
 ENV DATABASE_PATH=/app/data/agentcloak.db
 
 EXPOSE 3000
 
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD node -e "fetch('http://localhost:3000/health').then(r=>r.ok?process.exit(0):process.exit(1)).catch(()=>process.exit(1))"
+
+USER agentcloak
 CMD ["node", "packages/server/dist/index.js"]

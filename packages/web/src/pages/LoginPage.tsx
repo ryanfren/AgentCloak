@@ -21,11 +21,18 @@ export function LoginPage() {
     });
     // Check for error in URL params
     const params = new URLSearchParams(window.location.search);
+    const ERROR_MESSAGES: Record<string, string> = {
+      google_not_configured: "Google sign-in is not configured. Use email/password instead.",
+      account_uses_password: "This account uses password login. Please sign in with your password.",
+      session_mismatch: "Session expired. Please try again.",
+      invalid_account: "Account not found.",
+      exchange_failed: "Authentication failed. Please try again.",
+      missing_params: "Invalid request. Please try again.",
+      invalid_state: "Invalid or expired request. Please try again.",
+    };
     const urlError = params.get("error");
-    if (urlError === "google_not_configured") {
-      setError("Google sign-in is not configured. Use email/password instead.");
-    } else if (urlError) {
-      setError(urlError.replace(/_/g, " "));
+    if (urlError) {
+      setError(ERROR_MESSAGES[urlError] ?? "An error occurred. Please try again.");
     }
   }, []);
 

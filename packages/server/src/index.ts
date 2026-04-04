@@ -10,11 +10,13 @@ import { logger } from "hono/logger";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { loadConfig } from "./config.js";
 import { handleMcpRequest } from "./mcp/route.js";
+import { createMcpRateLimiter } from "./auth/rate-limit.js";
 import { createAuthRoutes } from "./routes/auth.js";
 import { createOAuthRoutes } from "./routes/oauth.js";
 import { createApiRoutes } from "./routes/api.js";
 import { createStorage } from "./storage/index.js";
 import { hashApiKey } from "./storage/sqlite.js";
+import { auditLog } from "./auth/audit-log.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,15 +32,49 @@ async function main() {
     60 * 60 * 1000,
   );
 
+  // MCP rate limiter: 200 requests/minute per API key
+  const mcpRateLimiter = createMcpRateLimiter(200, 60_000);
+
   const app = new Hono();
 
   // Global middleware
   app.use("*", logger());
-  // Dashboard routes need credentials (cookies) — restrict origin
+
+  // Security headers
+  app.use("*", async (c, next) => {
+    await next();
+    c.header("X-Content-Type-Options", "nosniff");
+    c.header("X-Frame-Options", "DENY");
+    c.header("Referrer-Policy", "strict-origin-when-cross-origin");
+    c.header("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
+    if (config.baseUrl.startsWith("https")) {
+      c.header("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+    }
+  });
+
+  // CORS: specific origins for API/auth, no wildcard fallback
   app.use("/api/*", cors({ origin: config.baseUrl, credentials: true }));
   app.use("/auth/*", cors({ origin: config.baseUrl, credentials: true }));
-  // Everything else (health, etc) uses permissive CORS
-  app.use("*", cors());
+
+  // Origin verification for state-changing requests (CSRF protection)
+  app.use("/api/*", async (c, next) => {
+    if (["POST", "PUT", "DELETE", "PATCH"].includes(c.req.method)) {
+      const origin = c.req.header("origin");
+      if (origin && origin !== config.baseUrl) {
+        return c.json({ error: "Origin mismatch" }, 403);
+      }
+    }
+    await next();
+  });
+  app.use("/auth/*", async (c, next) => {
+    if (["POST", "PUT", "DELETE"].includes(c.req.method)) {
+      const origin = c.req.header("origin");
+      if (origin && origin !== config.baseUrl) {
+        return c.json({ error: "Origin mismatch" }, 403);
+      }
+    }
+    await next();
+  });
 
   // Health check
   app.get("/health", (c) => {
@@ -48,7 +84,7 @@ async function main() {
   // Auth routes (email/password register + login, config)
   app.route("/auth", createAuthRoutes(storage, config));
 
-  // OAuth routes (Google login + connect)
+  // OAuth routes (Google login + connect + logout)
   app.route("/auth", createOAuthRoutes(storage, config));
 
   // Dashboard API routes (session auth)
@@ -102,7 +138,7 @@ async function main() {
     // Bypass Hono for POST /mcp — the MCP transport writes directly to the response
     if (req.method === "POST" && req.url === "/mcp") {
       // Handle CORS preflight headers
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Origin", config.baseUrl);
       res.setHeader(
         "Access-Control-Allow-Methods",
         "GET, POST, DELETE, OPTIONS",
@@ -111,6 +147,10 @@ async function main() {
         "Access-Control-Allow-Headers",
         "Content-Type, Authorization",
       );
+
+      // Security headers for MCP responses
+      res.setHeader("X-Content-Type-Options", "nosniff");
+      res.setHeader("X-Frame-Options", "DENY");
 
       // Authenticate API key
       const authHeader = req.headers.authorization;
@@ -135,6 +175,15 @@ async function main() {
       if (!storedKey) {
         res.writeHead(401, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: "Invalid API key" }));
+        auditLog("mcp.auth_failed", { prefix: apiKey.slice(0, 6) });
+        return;
+      }
+
+      // Per-API-key rate limiting
+      if (!mcpRateLimiter(storedKey.id)) {
+        res.writeHead(429, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "Rate limit exceeded" }));
+        auditLog("mcp.rate_limited", { keyId: storedKey.id });
         return;
       }
 
@@ -179,7 +228,7 @@ async function main() {
 
     // Handle CORS preflight for /mcp
     if (req.method === "OPTIONS" && req.url === "/mcp") {
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      res.setHeader("Access-Control-Allow-Origin", config.baseUrl);
       res.setHeader(
         "Access-Control-Allow-Methods",
         "GET, POST, DELETE, OPTIONS",

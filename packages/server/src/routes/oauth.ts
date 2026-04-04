@@ -12,6 +12,7 @@ import {
   generateLoginAuthUrl,
   verifyState,
 } from "../providers/gmail/oauth.js";
+import { auditLog } from "../auth/audit-log.js";
 import type { Storage } from "../storage/types.js";
 
 export function createOAuthRoutes(storage: Storage, config: Config) {
@@ -59,6 +60,13 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
     if (verified.flow === "login") {
       // Dashboard login flow
       const existing = await storage.getAccountByEmail(result.email);
+
+      // Prevent OAuth takeover of password-based accounts
+      if (existing?.passwordHash) {
+        auditLog("auth.oauth_takeover_blocked", { email: result.email });
+        return c.redirect("/login?error=account_uses_password");
+      }
+
       const accountId = existing?.id ?? nanoid(21);
       const now = Date.now();
 
@@ -80,12 +88,20 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
         config,
         finalAccount!.id,
       );
+      auditLog("auth.oauth_login", { email: result.email, accountId: finalAccount!.id });
       return c.redirect("/dashboard");
     }
 
     if (verified.flow === "connect") {
       // Connect Gmail flow — always create a new connection
       const { accountId } = verified;
+
+      // Verify current session matches state accountId (prevent CSRF)
+      const sid = getCookie(c, "sid");
+      const session = sid ? await storage.getSession(sid) : null;
+      if (!session || session.accountId !== accountId) {
+        return c.redirect("/connections?error=session_mismatch");
+      }
 
       const account = await storage.getAccount(accountId);
       if (!account) {
@@ -146,8 +162,8 @@ export function createOAuthRoutes(storage: Storage, config: Config) {
     return c.redirect("/?error=unknown_flow");
   });
 
-  // GET /auth/logout — Clear session
-  routes.get("/logout", async (c) => {
+  // POST /auth/logout — Clear session (POST to prevent CSRF via link/img)
+  routes.post("/logout", async (c) => {
     const sid = getCookie(c, "sid");
     if (sid) {
       await storage.deleteSession(sid);

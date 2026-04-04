@@ -222,8 +222,26 @@ export class BlocklistFilter implements EmailFilter {
   }
 }
 
+/**
+ * Simple heuristic check for potentially unsafe regex patterns (ReDoS risk).
+ * Detects common dangerous constructs: nested quantifiers, overlapping alternations.
+ */
+export function isUnsafeRegex(pattern: string): boolean {
+  // Nested quantifiers like (a+)+, (a*)+, (a{1,})+
+  if (/(\+|\*|\{[^}]*\})\s*\)[\+\*\{]/.test(pattern)) return true;
+  // Overlapping character classes with quantifiers like (a|a)+
+  if (/\(.*\|.*\)[\+\*]/.test(pattern) && pattern.length > 50) return true;
+  // Very long patterns are suspicious
+  if (pattern.length > 200) return true;
+  return false;
+}
+
 function safeRegExp(pattern: string): RegExp | null {
   try {
+    if (isUnsafeRegex(pattern)) {
+      console.warn(`Rejected unsafe regex pattern: ${pattern}`);
+      return null;
+    }
     return new RegExp(pattern, "i");
   } catch {
     return null;

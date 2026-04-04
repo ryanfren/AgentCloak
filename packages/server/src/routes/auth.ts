@@ -5,6 +5,7 @@ import { isGoogleOAuthConfigured } from "../config.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import { createRateLimiter } from "../auth/rate-limit.js";
 import { createSessionAndSetCookie } from "../auth/session.js";
+import { auditLog } from "../auth/audit-log.js";
 import type { Storage } from "../storage/types.js";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -60,6 +61,8 @@ export function createAuthRoutes(storage: Storage, config: Config) {
     if (existing) {
       // OAuth-only account — add password
       await storage.updateAccountPasswordHash(existing.id, passwordHash);
+      // Invalidate all existing sessions (password change = re-auth required)
+      await storage.deleteAccountSessions(existing.id);
       await createSessionAndSetCookie(c, storage, config, existing.id);
       return c.json({
         id: existing.id,
@@ -86,6 +89,7 @@ export function createAuthRoutes(storage: Storage, config: Config) {
     const account = await storage.getAccountByEmail(email);
     await createSessionAndSetCookie(c, storage, config, account!.id);
 
+    auditLog("auth.register", { email: account!.email, accountId: account!.id });
     return c.json(
       {
         id: account!.id,
@@ -116,15 +120,18 @@ export function createAuthRoutes(storage: Storage, config: Config) {
     if (!account || !account.passwordHash) {
       // Timing attack prevention: run a dummy hash so response time is consistent
       await hashPassword(password);
+      auditLog("auth.login_failed", { email: email ?? "unknown" });
       return c.json({ error: "Invalid email or password" }, 401);
     }
 
     const valid = await verifyPassword(password, account.passwordHash);
     if (!valid) {
+      auditLog("auth.login_failed", { email: email ?? "unknown" });
       return c.json({ error: "Invalid email or password" }, 401);
     }
 
     await createSessionAndSetCookie(c, storage, config, account.id);
+    auditLog("auth.login", { email: account.email, accountId: account.id });
     return c.json({
       id: account.id,
       email: account.email,

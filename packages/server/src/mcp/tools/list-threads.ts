@@ -51,10 +51,10 @@ export function registerListThreads(
         })
         .map((t) => ({
           id: t.id,
-          subject: t.subject,
+          subject: pipeline.redactText(t.subject),
           participants: formatAddresses(t.participants, pipeline),
           messageCount: t.messageCount,
-          snippet: t.snippet,
+          snippet: pipeline.redactText(t.snippet),
           lastMessageDate: t.lastMessageDate,
           isUnread: t.isUnread,
           labels: t.labels,

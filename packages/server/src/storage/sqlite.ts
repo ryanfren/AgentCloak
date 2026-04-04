@@ -5,6 +5,8 @@ import { dirname } from "node:path";
 import type {
   ConnectionCredentials,
   ConnectionStatus,
+  EncryptedOAuthTokens,
+  OAuthTokens,
   Storage,
   StoredAccount,
   StoredApiKey,
@@ -12,13 +14,16 @@ import type {
   StoredFilterConfig,
   StoredSession,
 } from "./types.js";
+import { encryptPassword, decryptPassword } from "../providers/imap/crypto.js";
 
 const CURRENT_SCHEMA_VERSION = 5;
 
 export class SqliteStorage implements Storage {
   private db: Database.Database;
+  private credentialSecret: string;
 
-  constructor(dbPath: string, encryptionKey?: string) {
+  constructor(dbPath: string, encryptionKey?: string, credentialSecret?: string) {
+    this.credentialSecret = credentialSecret ?? "";
     mkdirSync(dirname(dbPath), { recursive: true });
     this.db = new Database(dbPath);
 
@@ -438,6 +443,7 @@ export class SqliteStorage implements Storage {
   }
 
   async createConnection(conn: StoredEmailConnection): Promise<void> {
+    const tokensToStore = this.encryptOAuthTokens(conn.tokens);
     this.db
       .prepare(
         `INSERT INTO email_connections (id, account_id, email, provider, display_name, tokens_json, status, created_at, updated_at)
@@ -449,7 +455,7 @@ export class SqliteStorage implements Storage {
         conn.email,
         conn.provider,
         conn.displayName,
-        JSON.stringify(conn.tokens),
+        JSON.stringify(tokensToStore),
         conn.status,
         conn.createdAt,
         conn.updatedAt,
@@ -460,11 +466,12 @@ export class SqliteStorage implements Storage {
     id: string,
     tokens: ConnectionCredentials,
   ): Promise<void> {
+    const tokensToStore = this.encryptOAuthTokens(tokens);
     this.db
       .prepare(
         "UPDATE email_connections SET tokens_json = ?, updated_at = ? WHERE id = ?",
       )
-      .run(JSON.stringify(tokens), Date.now(), id);
+      .run(JSON.stringify(tokensToStore), Date.now(), id);
   }
 
   async updateConnectionStatus(
@@ -682,17 +689,67 @@ export class SqliteStorage implements Storage {
   private rowToConnection(
     row: Record<string, unknown>,
   ): StoredEmailConnection {
+    const rawTokens = JSON.parse(row.tokens_json as string);
     return {
       id: row.id as string,
       accountId: row.account_id as string,
       email: row.email as string,
       provider: row.provider as string,
       displayName: (row.display_name as string) ?? null,
-      tokens: JSON.parse(row.tokens_json as string),
+      tokens: this.decryptOAuthTokensIfNeeded(rawTokens),
       status: row.status as ConnectionStatus,
       createdAt: row.created_at as number,
       updatedAt: row.updated_at as number,
     };
+  }
+
+  /** Encrypt OAuth tokens before storage. Non-OAuth credentials pass through unchanged. */
+  private encryptOAuthTokens(tokens: ConnectionCredentials): ConnectionCredentials | EncryptedOAuthTokens {
+    // Only encrypt OAuth tokens (not IMAP/GAS which have their own encryption)
+    if (!this.credentialSecret) return tokens;
+    const t = tokens as unknown as Record<string, unknown>;
+    if (t.type === "imap" || t.type === "gas") return tokens;
+    // If already encrypted, pass through
+    if (t.type === "oauth_encrypted") return tokens as unknown as EncryptedOAuthTokens;
+
+    // This is an OAuthTokens object (type is "oauth" or undefined)
+    const oauth = tokens as OAuthTokens;
+    const combined = JSON.stringify({ a: oauth.accessToken, r: oauth.refreshToken });
+    const encrypted = encryptPassword(combined, this.credentialSecret);
+    return {
+      type: "oauth_encrypted" as const,
+      encryptedAccessToken: encrypted.encryptedPassword,
+      encryptedRefreshToken: "", // Combined into single encrypted blob
+      iv: encrypted.iv,
+      authTag: encrypted.authTag,
+      salt: encrypted.salt,
+      expiresAt: oauth.expiresAt,
+      scope: oauth.scope,
+    };
+  }
+
+  /** Decrypt OAuth tokens on read. Legacy plaintext tokens pass through unchanged. */
+  private decryptOAuthTokensIfNeeded(tokens: unknown): ConnectionCredentials {
+    const t = tokens as Record<string, unknown>;
+    if (t.type === "oauth_encrypted" && this.credentialSecret) {
+      const enc = tokens as EncryptedOAuthTokens;
+      const decrypted = decryptPassword(
+        enc.encryptedAccessToken,
+        enc.iv,
+        enc.authTag,
+        this.credentialSecret,
+        enc.salt,
+      );
+      const parsed = JSON.parse(decrypted) as { a: string; r: string };
+      return {
+        type: "oauth" as const,
+        accessToken: parsed.a,
+        refreshToken: parsed.r,
+        expiresAt: enc.expiresAt,
+        scope: enc.scope,
+      } satisfies OAuthTokens;
+    }
+    return tokens as ConnectionCredentials;
   }
 
   private rowToApiKey(row: Record<string, unknown>): StoredApiKey {

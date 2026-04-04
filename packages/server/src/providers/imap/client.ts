@@ -31,6 +31,7 @@ export class ImapProvider implements EmailProvider {
       credentials.iv,
       credentials.authTag,
       sessionSecret,
+      credentials.salt,
     );
   }
 

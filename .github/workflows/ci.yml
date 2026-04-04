@@ -35,3 +35,11 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+      - name: Audit dependencies
+        run: pnpm audit --audit-level=moderate || true
+
+      - name: Secret scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --only-verified

@@ -1,4 +1,6 @@
 import { randomBytes } from "node:crypto";
+import { resolve4, resolve6 } from "node:dns/promises";
+import { isIPv4, isIPv6 } from "node:net";
 import { Hono } from "hono";
 import { ImapFlow } from "imapflow";
 import { nanoid } from "nanoid";
@@ -9,6 +11,7 @@ import { sessionMiddleware, type SessionEnv } from "../auth/session.js";
 import { GasProvider } from "../providers/gas/client.js";
 import { generateGasScript } from "../providers/gas/script-template.js";
 import { encryptPassword } from "../providers/imap/crypto.js";
+import { isUnsafeRegex } from "../filters/blocklist.js";
 import { generateConnectAuthUrl, generateReauthorizeAuthUrl } from "../providers/gmail/oauth.js";
 import type { GasCredentials, ImapCredentials, Storage } from "../storage/types.js";
 
@@ -94,7 +97,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       return c.json({ success: false, error: "Missing required fields" }, 400);
     }
 
-    const portValidation = validateImapInput(body.host, body.port);
+    const portValidation = await validateImapHost(body.host, body.port);
     if (portValidation) {
       return c.json({ success: false, error: portValidation }, 400);
     }
@@ -138,7 +141,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       return c.json({ error: "Missing required fields" }, 400);
     }
 
-    const inputValidation = validateImapInput(body.host, body.port);
+    const inputValidation = await validateImapHost(body.host, body.port);
     if (inputValidation) {
       return c.json({ error: inputValidation }, 400);
     }
@@ -167,7 +170,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       try { await client.close(); } catch { /* already closed */ }
     }
 
-    // Encrypt password
+    // Encrypt password (with per-credential random salt)
     const encrypted = encryptPassword(body.password, config.sessionSecret);
 
     const credentials: ImapCredentials = {
@@ -178,6 +181,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       encryptedPassword: encrypted.encryptedPassword,
       iv: encrypted.iv,
       authTag: encrypted.authTag,
+      salt: encrypted.salt,
       tls,
     };
 
@@ -296,6 +300,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       encryptedSecret: encrypted.encryptedPassword,
       iv: encrypted.iv,
       authTag: encrypted.authTag,
+      salt: encrypted.salt,
     };
 
     // Create new connection
@@ -537,7 +542,7 @@ export function createApiRoutes(storage: Storage, config: Config) {
       }
     }
 
-    // Validate regex patterns are valid
+    // Validate regex patterns are valid and safe from ReDoS
     for (const field of ["blockedSenderPatterns", "blockedSubjectPatterns"] as const) {
       const arr = body[field];
       if (arr) {
@@ -547,8 +552,20 @@ export function createApiRoutes(storage: Storage, config: Config) {
           } catch {
             return c.json({ error: `Invalid regex pattern in ${field}: ${pattern}` }, 400);
           }
+          if (isUnsafeRegex(pattern)) {
+            return c.json({ error: `Regex pattern "${pattern}" in ${field} is potentially unsafe (ReDoS risk)` }, 400);
+          }
         }
       }
+    }
+
+    // Enforce minimum security floors — PII redaction and injection detection cannot be disabled
+    const enforcedWarnings: string[] = [];
+    if (body.piiRedactionEnabled === false) {
+      enforcedWarnings.push("piiRedactionEnabled cannot be disabled (security floor)");
+    }
+    if (body.injectionDetectionEnabled === false) {
+      enforcedWarnings.push("injectionDetectionEnabled cannot be disabled (security floor)");
     }
 
     const existing = await storage.getFilterConfig(conn.id);
@@ -559,12 +576,8 @@ export function createApiRoutes(storage: Storage, config: Config) {
         body.blockedSenderPatterns ?? existing?.blockedSenderPatterns ?? [],
       blockedSubjectPatterns:
         body.blockedSubjectPatterns ?? existing?.blockedSubjectPatterns ?? [],
-      piiRedactionEnabled:
-        body.piiRedactionEnabled ?? existing?.piiRedactionEnabled ?? true,
-      injectionDetectionEnabled:
-        body.injectionDetectionEnabled ??
-        existing?.injectionDetectionEnabled ??
-        true,
+      piiRedactionEnabled: true,              // Security floor: always on
+      injectionDetectionEnabled: true,        // Security floor: always on
       emailRedactionEnabled:
         body.emailRedactionEnabled ?? existing?.emailRedactionEnabled ?? true,
       showFilteredCount:
@@ -584,14 +597,15 @@ export function createApiRoutes(storage: Storage, config: Config) {
     };
 
     await storage.upsertFilterConfig(merged);
-    return c.json(merged);
+    const response: Record<string, unknown> = { ...merged };
+    if (enforcedWarnings.length > 0) {
+      response._warnings = enforcedWarnings;
+    }
+    return c.json(response);
   });
 
   return api;
 }
-
-const BLOCKED_HOST_PATTERN =
-  /^(localhost|127\.\d+\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|192\.168\.\d+\.\d+|0\.0\.0\.0|\[::1\])$/i;
 
 function validateGasUrl(url: string): string | null {
   try {
@@ -614,12 +628,80 @@ function validateGasUrl(url: string): string | null {
   }
 }
 
-function validateImapInput(host: string, port: number): string | null {
+function isPrivateOrReservedIP(ip: string): boolean {
+  if (isIPv4(ip)) {
+    const parts = ip.split(".").map(Number);
+    const [a, b] = parts;
+    // Loopback: 127.0.0.0/8
+    if (a === 127) return true;
+    // Private: 10.0.0.0/8
+    if (a === 10) return true;
+    // Private: 172.16.0.0/12
+    if (a === 172 && b !== undefined && b >= 16 && b <= 31) return true;
+    // Private: 192.168.0.0/16
+    if (a === 192 && b === 168) return true;
+    // Link-local: 169.254.0.0/16 (includes cloud metadata 169.254.169.254)
+    if (a === 169 && b === 254) return true;
+    // Current network: 0.0.0.0/8
+    if (a === 0) return true;
+    // Multicast: 224.0.0.0/4
+    if (a !== undefined && a >= 224 && a <= 239) return true;
+    // Broadcast / reserved
+    if (a !== undefined && a >= 240) return true;
+    return false;
+  }
+
+  if (isIPv6(ip)) {
+    const lower = ip.toLowerCase();
+    // Loopback: ::1
+    if (lower === "::1" || lower === "0000:0000:0000:0000:0000:0000:0000:0001") return true;
+    // Unspecified: ::
+    if (lower === "::" || lower === "0000:0000:0000:0000:0000:0000:0000:0000") return true;
+    // Link-local: fe80::/10
+    if (lower.startsWith("fe80:") || lower.startsWith("fe80")) return true;
+    // Unique local: fc00::/7
+    if (lower.startsWith("fc") || lower.startsWith("fd")) return true;
+    // IPv4-mapped IPv6: ::ffff:x.x.x.x — extract IPv4 and check
+    const v4mapped = lower.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (v4mapped) return isPrivateOrReservedIP(v4mapped[1]!);
+    return false;
+  }
+
+  return false;
+}
+
+async function validateImapHost(host: string, port: number): Promise<string | null> {
   if (!Number.isInteger(port) || port < 1 || port > 65535) {
     return "Port must be an integer between 1 and 65535";
   }
-  if (BLOCKED_HOST_PATTERN.test(host)) {
-    return "Internal/private hosts are not allowed";
+
+  // If host is already an IP address, validate directly
+  if (isIPv4(host) || isIPv6(host)) {
+    if (isPrivateOrReservedIP(host)) {
+      return "Internal/private hosts are not allowed";
+    }
+    return null;
   }
+
+  // Resolve hostname to IPs and validate ALL resolved addresses
+  let ips: string[] = [];
+  try {
+    const v4 = await resolve4(host).catch(() => [] as string[]);
+    const v6 = await resolve6(host).catch(() => [] as string[]);
+    ips = [...v4, ...v6];
+  } catch {
+    return "Could not resolve hostname";
+  }
+
+  if (ips.length === 0) {
+    return "Could not resolve hostname";
+  }
+
+  for (const ip of ips) {
+    if (isPrivateOrReservedIP(ip)) {
+      return "Internal/private hosts are not allowed";
+    }
+  }
+
   return null;
 }

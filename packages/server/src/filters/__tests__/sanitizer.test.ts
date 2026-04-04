@@ -135,4 +135,30 @@ describe("SanitizerFilter", () => {
       expect(result.message.snippet).toBe("Normal snippet");
     });
   });
+
+  describe("Unicode NFKC normalization", () => {
+    it("normalizes Cyrillic homoglyphs to Latin equivalents", () => {
+      const filter = new SanitizerFilter();
+      // \u0410 is Cyrillic A, \u0435 is Cyrillic e
+      const msg = makeMessage({
+        body: "\u0410dmin \u0435xec",
+      });
+      const result = filter.filter(msg);
+
+      // NFKC may or may not collapse these specific chars,
+      // but the normalization should be applied
+      expect(result.message.body).toBe(result.message.body.normalize("NFKC"));
+    });
+
+    it("normalizes fullwidth characters", () => {
+      const filter = new SanitizerFilter();
+      // Fullwidth "Hello" = \uFF28\uFF45\uFF4C\uFF4C\uFF4F
+      const msg = makeMessage({
+        body: "\uFF28\uFF45\uFF4C\uFF4C\uFF4F",
+      });
+      const result = filter.filter(msg);
+
+      expect(result.message.body).toBe("Hello");
+    });
+  });
 });

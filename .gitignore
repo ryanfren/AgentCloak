@@ -15,3 +15,12 @@ data/
 coverage/
 .claude-private.md
 MULTI_ACCOUNT_PLAN.md
+
+# Security: prevent accidental secret/credential commits
+*.bak
+*.pem
+*.key
+*.cert
+*.p12
+credentials.json
+service-account.json

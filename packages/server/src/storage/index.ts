@@ -6,6 +6,7 @@ export async function createStorage(config: Config): Promise<Storage> {
   const storage = new SqliteStorage(
     config.databasePath,
     config.databaseEncryptionKey,
+    config.credentialEncryptionKey ?? config.sessionSecret,
   );
   await storage.init();
   return storage;

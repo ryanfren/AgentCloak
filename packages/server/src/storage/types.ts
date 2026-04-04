@@ -6,6 +6,18 @@ export interface OAuthTokens {
   scope: string;
 }
 
+/** Encrypted at-rest representation of OAuth tokens */
+export interface EncryptedOAuthTokens {
+  type: "oauth_encrypted";
+  encryptedAccessToken: string;
+  encryptedRefreshToken: string;
+  iv: string;
+  authTag: string;
+  salt: string;
+  expiresAt: number;
+  scope: string;
+}
+
 export interface ImapCredentials {
   type: "imap";
   host: string;
@@ -15,6 +27,8 @@ export interface ImapCredentials {
   iv: string;
   authTag: string;
   tls: boolean;
+  /** Per-credential salt (hex). Absent for legacy credentials using static salt. */
+  salt?: string;
 }
 
 export interface GasCredentials {
@@ -23,6 +37,8 @@ export interface GasCredentials {
   encryptedSecret: string;
   iv: string;
   authTag: string;
+  /** Per-credential salt (hex). Absent for legacy credentials using static salt. */
+  salt?: string;
 }
 
 /**

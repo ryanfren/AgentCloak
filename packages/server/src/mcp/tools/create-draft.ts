@@ -1,10 +1,12 @@
 import { z } from "zod";
 import type { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { FilterPipeline } from "../../filters/pipeline.js";
 import type { EmailProvider } from "../../providers/types.js";
 
 export function registerCreateDraft(
   server: McpServer,
   provider: EmailProvider,
+  pipeline: FilterPipeline,
 ) {
   server.tool(
     "create_draft",
@@ -38,9 +40,34 @@ export function registerCreateDraft(
         };
       }
 
+      // Check recipients against blocked domains (prevent exfiltration)
+      const blockedDomains = pipeline.blockedDomains;
+      if (blockedDomains.length > 0) {
+        for (const recipient of recipients) {
+          const domain = recipient.split("@")[1]?.toLowerCase();
+          if (domain && blockedDomains.some((bd) => domain === bd || domain.endsWith(`.${bd}`))) {
+            return {
+              content: [
+                {
+                  type: "text" as const,
+                  text: JSON.stringify({
+                    error: "blocked",
+                    reason: `Recipient domain blocked: ${domain}`,
+                  }),
+                },
+              ],
+              isError: true,
+            };
+          }
+        }
+      }
+
+      // Strip CRLF from subject (header injection prevention)
+      const safeSubject = subject.replace(/[\r\n]/g, " ");
+
       const result = await provider.createDraft({
         to: recipients,
-        subject,
+        subject: safeSubject,
         body,
         inReplyToThreadId: in_reply_to_thread_id,
       });

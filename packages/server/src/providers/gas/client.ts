@@ -34,6 +34,7 @@ export class GasProvider implements EmailProvider {
       credentials.iv,
       credentials.authTag,
       sessionSecret,
+      credentials.salt,
     );
   }
 

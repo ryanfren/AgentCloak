@@ -60,10 +60,20 @@ export async function handleMcpRequest(
 
   await mcpServer.connect(transport);
 
-  // Parse body from the raw request
+  // Parse body from the raw request (with size limit)
+  const MAX_BODY_SIZE = 1024 * 1024; // 1MB
   const body = await new Promise<unknown>((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
+    let totalSize = 0;
+    req.on("data", (chunk: Buffer) => {
+      totalSize += chunk.length;
+      if (totalSize > MAX_BODY_SIZE) {
+        req.destroy();
+        reject(new Error("Request body too large"));
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on("end", () => {
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString()));
